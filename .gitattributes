@@ -1,0 +1,15 @@
+# O add-on corre dentro de um container Linux. Estes ficheiros TÊM de lá
+# chegar com fins de linha LF.
+#
+# O Git para Windows vem com core.autocrlf=true por omissão: converte LF em
+# CRLF ao fazer checkout. Um run.sh com \r colado ao fim do shebang mata o
+# container em ciclo com "unable to exec sh: No such file or directory" —
+# o sh existe, o "sh\r" é que não. Estas regras passam à frente do
+# autocrlf e garantem LF mesmo em checkouts no Windows. (O Supervisor clona
+# este repositório em Linux, onde o problema não existe; a regra protege
+# quem edita daqui.)
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf

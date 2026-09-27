@@ -1,0 +1,4 @@
+configuration:
+  secret:
+    name: Segredo de cópias
+    description: Gerado na consola Domnex (Instalações → Segredo cópias). Autentica o batimento e a entrega das cópias desta casa. Mostra-se uma vez na consola; gerar outro substitui este.

@@ -1,0 +1,4 @@
+configuration:
+  secret:
+    name: Backup secret
+    description: Generated in the Domnex console (Installations → Backup secret). Authenticates this house's heartbeat and backup deliveries. Shown once in the console; generating another one replaces this.

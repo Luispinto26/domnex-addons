@@ -1,0 +1,6 @@
+# A imagem-base do add-on, por arquitetura. Os Supervisors recentes já não
+# preenchem o BUILD_FROM sozinhos — sem este ficheiro o build morre com
+# "base name ($BUILD_FROM) should not be blank".
+build_from:
+  aarch64: ghcr.io/home-assistant/aarch64-base:latest
+  amd64: ghcr.io/home-assistant/amd64-base:latest
