@@ -1,4 +1,7 @@
 configuration:
   secret:
     name: Backup secret
-    description: Generated in the Domnex console (Installations → Backup secret). Authenticates this house's heartbeat and backup deliveries. Shown once in the console; generating another one replaces this.
+    description: Only for houses installed before 0.3.0, or to replace the secret by hand. Generated in the Domnex console (Installations → Backup secret); shown once, and generating another one replaces this. Leave empty when using the installation code.
+  code:
+    name: Installation code
+    description: "Generated in the Domnex console (Frota → Nova casa). Used once: the agent registers the house and stores the secret by itself."

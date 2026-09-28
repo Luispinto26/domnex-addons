@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.3.0 — 2026-09-28
+
+- **Código de instalação.** Uma casa nova já não precisa de segredo colado
+  à mão: gera-se um código na consola (Frota → Nova casa), escreve-se na
+  opção *Código de instalação*, e o agente troca-o sozinho pelo segredo da
+  casa, que guarda em `/data/secret`. Um código recusado diz-se uma vez no
+  registo e não se repete até o add-on reiniciar. As casas com o segredo
+  nas opções continuam como estão (e o das opções ganha sempre).
+- **Inventário.** Ao arrancar, de hora a hora e depois de cada comando, o
+  agente manda à consola o que a casa tem: versões do Core, SO e
+  Supervisor (e a versão do SO à espera de reinício), disco, rede, add-ons,
+  integrações, atualizações pendentes e pens USB. Não saem as opções dos
+  add-ons nem o nome das integrações (que pode ter o email do cliente).
+  Com o Core a arrancar, espera; à terceira tentativa manda sem as
+  integrações e as atualizações.
+- **Comandos da consola**, um de cada vez e com resultado: atualizar um
+  componente (Core, SO, Supervisor, add-on, HACS, firmware — pela entidade
+  de atualização do HA, com cópia antes quando se pede), reiniciar o Home
+  Assistant, reiniciar o Pi, iniciar/parar/reiniciar um add-on, mandar o
+  inventário. Uma atualização só é pedida se a versão disponível ainda é a
+  que a consola viu, e só conta como feita quando a versão nova está mesmo
+  a correr (até 45 min) — no Core, quando o Core novo responde e o
+  Supervisor acabou de o verificar; se o Supervisor voltar à versão
+  anterior, o resultado diz em que versão ficou. A do SO fica à espera de
+  reiniciar o Pi, que o agente nunca faz sozinho. Se o agente parar a meio
+  (o Pi a reiniciar, o próprio agente a atualizar-se), retoma ao arrancar;
+  um comando cujo trabalho morra a meio não prende a fila, e um resultado
+  que não caiba em `/data` vai direto à consola.
+- Uma permissão nova, `homeassistant_api`: o inventário e as atualizações
+  falam com o Core pela API do Supervisor.
+- O batimento diz a versão do agente; a consola só manda comandos a quem
+  tem a 0.3.0. O batimento, os recados antigos (reiniciar/atualizar o HA)
+  e a entrega das cópias portam-se como na 0.2.4.
+
 ## 0.2.4 — 2026-09-28
 
 - O agente passa a instalar-se e a atualizar-se pela loja de add-ons, a

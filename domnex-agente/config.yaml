@@ -1,5 +1,10 @@
 # O agente local da Domnex: entrega a cópia diária ao cofre e mantém o
 # batimento com a consola (versão do HA, reiniciar/atualizar à distância).
+# A 0.3.0 junta-lhe a frota: manda à consola o inventário da casa (Core, SO,
+# Supervisor, add-ons, integrações, atualizações pendentes, USB), executa
+# os comandos da fila (atualizar um componente, reiniciar o HA ou o Pi,
+# iniciar/parar/reiniciar um add-on) e devolve o resultado; e uma casa nova
+# regista-se sozinha com um código de instalação, sem segredos colados à mão.
 # Instala-se pela loja de add-ons do Home Assistant, com o repositório
 # github.com/Luispinto26/domnex-addons adicionado — é daqui que as casas
 # recebem as atualizações do agente. (Até à 0.2.3 copiava-se a pasta para
@@ -13,7 +18,7 @@
 # A passagem de `local_omnex_backup` para `<hash deste repositório>_omnex_backup`
 # é exatamente essa troca, uma vez e à mão, nas casas que vinham de /addons.
 name: Domnex Agente
-version: "0.2.4"
+version: "0.3.0"
 slug: omnex_backup
 description: Cópias de segurança no cofre da Domnex e gestão remota pela consola
 url: https://github.com/Luispinto26/domnex-addons
@@ -25,13 +30,26 @@ boot: auto
 init: false
 # O batimento fala com o Supervisor: `core/info` para a versão, e
 # `core/restart`/`core/update` quando a consola os pede — daí o papel
-# manager, o mínimo que pode reiniciar e atualizar o Core.
+# manager, o mínimo que pode reiniciar e atualizar o Core. Chega também
+# para o resto da 0.3.0: ler `/addons`, `/core`, `/os`, `/supervisor`,
+# `/host`, `/network`, `/hardware` e `/jobs` (é por lá que se vê que o
+# Supervisor acabou de atualizar o Core), iniciar/parar/reiniciar add-ons e
+# reiniciar o Pi (`/host/reboot`).
 hassio_api: true
 hassio_role: manager
+# O inventário (integrações, atualizações pendentes) e os updates passam
+# pelo proxy `/core/api` do Supervisor, que responde 401 a um add-on sem
+# isto.
+homeassistant_api: true
 map:
   - backup:ro
   - homeassistant_config:ro
+# `str?`: as duas são opcionais. Uma casa nova usa só o código (o segredo
+# que o registo devolve fica em /data/secret); as casas de antes da 0.3.0
+# têm só o segredo, e mantêm-no ao atualizar.
 options:
   secret: ""
+  code: ""
 schema:
-  secret: str
+  secret: "str?"
+  code: "str?"

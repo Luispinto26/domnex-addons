@@ -1,4 +1,7 @@
 configuration:
   secret:
     name: Segredo de cópias
-    description: Gerado na consola Domnex (Instalações → Segredo cópias). Autentica o batimento e a entrega das cópias desta casa. Mostra-se uma vez na consola; gerar outro substitui este.
+    description: Só para as casas instaladas antes da 0.3.0, ou para substituir o segredo à mão. Gerado na consola Domnex (Instalações → Segredo cópias); mostra-se uma vez, e gerar outro substitui este. Com o código de instalação, fica vazio.
+  code:
+    name: Código de instalação
+    description: "Gerado na consola Domnex (Frota → Nova casa). Usa-se uma vez: o agente regista a casa e guarda o segredo sozinho."
