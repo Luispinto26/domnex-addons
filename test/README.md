@@ -13,7 +13,7 @@ recente. Da raiz do repositório:
 node test/cenarios.js
 ```
 
-Constrói a imagem `domnex-agente:0.3.0-teste` a partir de `domnex-agente/`
+Constrói a imagem `domnex-agente:0.3.1-teste` a partir de `domnex-agente/`
 (base `ghcr.io/home-assistant/amd64-base:latest`) e corre os cenários um a
 um. Demora uns 9 minutos. Sai com 0 se todos passarem.
 
@@ -101,3 +101,32 @@ Os dois falsos também arrancam sozinhos, para experimentar à mão:
 28. (extra) O batimento com o ficheiro dos comandos impossível de abrir →
     erro no registo, mas o agente não morre (a função `batimento` do
     `/run.sh` da imagem, com o resto a fingir).
+
+Os do carteiro da 0.3.1 (o incidente de 29 set 2026 na casa-piloto: uma
+parcial de 20 KB ficou no cofre no lugar da cópia do dia). As cópias em
+`/backup` têm a mtime fixada, e o cenário muda-as por fora, como outro
+add-on; o carteiro passa nos batimentos 0, 30, 60…, e o cenário espera por
+esses batimentos (como o 13). Contra a imagem da 0.3.0
+(`IMAGEM=domnex-agente:0.3.0-teste`) o 29, o 30, o 31, o 33 e o 36 falham.
+
+29. Em `/backup` só parciais de add-ons (a do Cloudflared da casa-piloto) →
+    nenhum pedido ao cofre; uma linha no registo, que não se repete na
+    passagem seguinte.
+30. O incidente: a automática de hoje é entregue e depois sai de `/backup`,
+    ficando uma parcial (o tar mais recente) e a automática de ontem → nas
+    duas passagens seguintes não se entrega nenhuma; a linha "não é mais
+    nova" aparece uma vez.
+31. A seguir (a marca da de hoje, a de ontem em `/backup`) aparece a
+    automática da noite seguinte → é entregue na passagem seguinte.
+32. Vinda da 0.3.0: com `/data/last_uploaded` a apontar para a parcial (o
+    estado real da casa-piloto), vazio, ou com lixo → entrega a automática
+    mais recente e a marca passa para ela.
+33. HA antes da 2026.8: a automática chama-se
+    `Automatic_backup_2026.7.3_…` (A grande, versão com pontos) → entrega-se.
+34. A marca é de uma cópia com a mtime no futuro (relógio adiantado) → não
+    trava a automática de hoje.
+35. Vinda da 0.3.0 com a marca numa parcial mais nova do que a automática
+    do dia → entrega a automática.
+36. A automática foi mexida há 1 minuto (o Supervisor ainda a escrever) →
+    não vai na passagem 0; mexida há 10 minutos, vai na passagem 30, sem
+    linhas no registo pela espera.

@@ -1,6 +1,7 @@
-// Os cenários do Domnex Agente 0.3.0 (os 14 da secção G do plano da fase 1
-// e os extra), corridos na imagem real do add-on, com Docker, contra um
-// Supervisor + Core falso e um relay falso (os dois neste processo).
+// Os cenários do Domnex Agente 0.3.1 (os 14 da secção G do plano da fase 1,
+// os extra e os do carteiro da 0.3.1), corridos na imagem real do add-on,
+// com Docker, contra um Supervisor + Core falso e um relay falso (os dois
+// neste processo).
 //
 //   node test/cenarios.js              constrói a imagem e corre todos
 //   node test/cenarios.js 6 8 10       só estes
@@ -25,7 +26,7 @@ const { criarRelay, UUID, SEGREDO } = require("./relay-falso");
 
 const RAIZ = path.resolve(__dirname, "..");
 const PASTA_ADDON = path.join(RAIZ, "domnex-agente");
-const IMAGEM = process.env.IMAGEM || "domnex-agente:0.3.0-teste";
+const IMAGEM = process.env.IMAGEM || "domnex-agente:0.3.1-teste";
 const BASE = process.env.BUILD_FROM || "ghcr.io/home-assistant/amd64-base:latest";
 const HOST = process.env.HOST_DOCKER || "host.docker.internal";
 const CODIGO = "INST-ABCD-EFGH";
@@ -70,6 +71,22 @@ const inventarios = () => relay.pedidos.filter((p) => p.caminho === `/agent/${UU
 const resultados = (id) => relay.pedidos.filter((p) => p.caminho === `/agent/${UUID}/commands/${id}` && naoCaiu(p));
 const pedidosSup = (metodo, caminho) => sup.pedidos.filter((p) => p.metodo === metodo && p.caminho === caminho);
 const addonFalso = (slug) => sup.estado.addons.find((a) => a.slug === slug);
+const doCofre = () => relay.pedidos.filter((p) => p.caminho.startsWith(`/backup/${UUID}/`) || p.metodo === "PUT");
+
+// O carteiro passa no batimento 0 e depois de 30 em 30 (com o batimento a
+// 1 s, de 30 em 30 s), logo a seguir ao batimento: quando chega o batimento
+// 30·n + 1, a passagem n já acabou. Conta os batimentos de todas as casas do
+// cenário: só serve com uma casa a correr.
+const depoisDaPassagem = (n) => esperar(() => batimentos().length >= 30 * n + 2, 30000 * (n + 1), 500);
+
+// Uma cópia em /backup: o conteúdo, ou {corpo, mtime} (em segundos) para
+// fixar a data — é pela mtime que o carteiro escolhe e compara.
+function poCopia(pasta, nome, c) {
+  const f = path.join(pasta, nome);
+  fs.writeFileSync(f, c && c.corpo !== undefined ? c.corpo : c);
+  if (c && c.mtime) fs.utimesSync(f, c.mtime, c.mtime);
+}
+const seg = (iso) => Math.floor(Date.parse(iso) / 1000);
 
 let contador = 0;
 const casas = [];
@@ -93,7 +110,7 @@ function novaCasa({ secret = SEGREDO, code = "", backups = {}, dados = {}, semIn
     path.join(conf, ".storage", "core.uuid"),
     JSON.stringify({ version: 1, minor_version: 1, key: "core.uuid", data: { uuid: UUID } }),
   );
-  for (const [nome, conteudo] of Object.entries(backups)) fs.writeFileSync(path.join(backup, nome), conteudo);
+  for (const [nome, c] of Object.entries(backups)) poCopia(backup, nome, c);
   for (const [nome, conteudo] of Object.entries(dados)) fs.writeFileSync(path.join(data, nome), conteudo);
 
   const nome = `${PREFIXO}${++contador}`;
@@ -128,6 +145,9 @@ function novaCasa({ secret = SEGREDO, code = "", backups = {}, dados = {}, semIn
     existe: semInodes
       ? (f) => docker(["exec", nome, "test", "-e", `/data/${f}`]).codigo === 0
       : (f) => fs.existsSync(path.join(data, f)),
+    // O /backup está só de leitura no contentor: muda-se daqui, como outro add-on.
+    poeCopias: (bs) => Object.entries(bs).forEach(([f, c]) => poCopia(backup, f, c)),
+    tiraCopia: (f) => fs.rmSync(path.join(backup, f)),
     parar: () => docker(["stop", "-t", "2", nome]),
     arrancar: () => docker(["start", nome]),
     exec: (...cmd) => docker(["exec", nome, ...cmd]),
@@ -164,7 +184,37 @@ const UPDATE_MOSQUITTO = (id) => ({
 });
 
 // ---------------------------------------------------------------------------
-// Os cenários (1–14 os obrigatórios, 15 em diante os extra)
+// As cópias dos cenários do carteiro (29 em diante), com os nomes que o HA
+// lhes dá em /backup (o nome da cópia em slug, a data, um sufixo), a mtime
+// e um tamanho diferente cada uma, para se saber pelo PUT qual foi entregue
+// ---------------------------------------------------------------------------
+
+const COPIAS = {
+  // A parcial que o HA fez antes de atualizar o Cloudflared, e que a 0.3.0
+  // entregou ao cofre na casa-piloto a 29 set 2026 (20 KB).
+  parcialPiloto: { nome: "cloudflared_7_0_14_2026-09-14_11.33_25684919.tar", bytes: 20480, mtime: seg("2026-09-14T11:33:25Z") },
+  // Outra parcial, feita depois da automática de hoje: o tar mais recente.
+  parcialHoje: { nome: "mosquitto_broker_7_1_2_2026-09-29_11.33_99887766.tar", bytes: 10240, mtime: seg("2026-09-29T11:33:59Z") },
+  auto28: { nome: "automatic_backup_2026_9_3_2026-09-28_03.00_11223344.tar", bytes: 3000, mtime: seg("2026-09-28T03:00:11Z") },
+  auto29: { nome: "automatic_backup_2026_9_3_2026-09-29_03.00_44556677.tar", bytes: 4096, mtime: seg("2026-09-29T03:00:44Z") },
+  auto30: { nome: "automatic_backup_2026_9_4_2026-09-30_03.00_22334455.tar", bytes: 5120, mtime: seg("2026-09-30T03:00:22Z") },
+  // O nome antes do HA 2026.8: "A" grande e a versão com pontos.
+  autoAntiga: { nome: "Automatic_backup_2026.7.3_2026-09-28_04.45_12345678.tar", bytes: 6144, mtime: seg("2026-09-28T03:45:12Z") },
+  // Uma cópia entregue com o relógio da casa adiantado (já saiu de /backup).
+  autoFutura: { nome: "automatic_backup_2027_3_1_2027-03-01_03.00_99999999.tar", bytes: 8192, mtime: seg("2027-03-01T03:00:00Z") },
+  // A que o Supervisor está a escrever: a mtime dá-a o cenário.
+  autoFresca: { nome: "automatic_backup_2026_9_4_2026-09-29_21.30_55667788.tar", bytes: 7168 },
+};
+// Para novaCasa({ backups }) e casa.poeCopias().
+const emBackup = (...cs) => Object.fromEntries(cs.map((c) => [c.nome, { corpo: Buffer.alloc(c.bytes, 1), mtime: c.mtime }]));
+// A marca que o carteiro grava em $DATA/last_uploaded (a mesma desde a 0.2).
+const marca = (c) => `/backup/${c.nome} ${c.mtime}`;
+// Qual das cópias é, pelo tamanho do PUT.
+const qual = (bytes) => (Object.values(COPIAS).find((c) => c.bytes === bytes) || { nome: `${bytes} bytes` }).nome;
+
+// ---------------------------------------------------------------------------
+// Os cenários (1–14 os obrigatórios, 15–28 os extra, 29 em diante os do
+// carteiro da 0.3.1)
 // ---------------------------------------------------------------------------
 
 const cenarios = [
@@ -236,7 +286,7 @@ const cenarios = [
       await esperar(() => pedidosSup("POST", "/core/update").length && batimentos().length >= 6, 20000);
       v.ok(relay.pedidos.every((p) => p.segredo !== velho), "com segredo nas opções e em /data/secret, ganha o das opções");
       const b = batimentos()[0];
-      v.ok(b && isDeepStrictEqual(json(b.corpo), { version: "2026.9.3", latest: "2026.9.4", agent: "0.3.0" }),
+      v.ok(b && isDeepStrictEqual(json(b.corpo), { version: "2026.9.3", latest: "2026.9.4", agent: "0.3.1" }),
         "corpo do batimento = {version, latest, agent}");
       v.ok(b && chaves(json(b.corpo)) === "agent,latest,version", "sem campos a mais no batimento");
       v.ok(b && b.segredo === SEGREDO && b.tipo === "application/json", "x-backup-secret e content-type certos");
@@ -245,7 +295,10 @@ const cenarios = [
       v.ok(pedidosSup("POST", "/core/update").length === 1, "o recado update chegou ao Supervisor (POST /core/update)");
       const linhas = casa.linhas();
       v.ok(linhas.some((l) => l.endsWith("Reinício do Home Assistant pedido pela consola.")), "linha do recado restart");
-      v.ok(linhas.length === 3, `batimentos bem-sucedidos não escrevem nada: só 3 linhas em ${batimentos().length} batimentos (${linhas.length})`);
+      // As 3 linhas (arranque e os dois recados) e a do carteiro, que aqui
+      // não encontra nenhuma cópia em /backup (desde a 0.3.1 di-lo uma vez).
+      v.ok(linhas.length === 4 && linhas.filter((l) => l.includes("Nenhuma cópia automática em /backup")).length === 1,
+        `batimentos bem-sucedidos não escrevem nada: só 4 linhas em ${batimentos().length} batimentos, uma delas a do carteiro (${linhas.length})`);
       v.ev(`batimento: ${b && b.corpo} (x-backup-secret ${b && b.segredo === SEGREDO ? "certo" : "ERRADO"})`);
       v.ev(`resposta do relay ao 1.º batimento: ${JSON.stringify(b && b.resposta)}`);
       v.ev(`Supervisor: POST /core/restart ${rs.length}×, POST /core/update ${pedidosSup("POST", "/core/update").length}×`);
@@ -266,7 +319,7 @@ const cenarios = [
       if (!j) return;
       v.ok(inv.segredo === SEGREDO && inv.tipo === "application/json", "com o segredo e como application/json");
       v.ok(chaves(j) === "addons,agent,collected_at,integrations,system,updates,usb", `chaves de topo: ${chaves(j)}`);
-      v.ok(j.agent === "0.3.0" && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(j.collected_at), "agent e collected_at");
+      v.ok(j.agent === "0.3.1" && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(j.collected_at), "agent e collected_at");
       const s = j.system || {};
       v.ok(chaves(s) === "arch,core,host,ipv4,machine,os,supervisor", `chaves de system: ${chaves(s)}`);
       v.ok(isDeepStrictEqual(s.core, { version: "2026.9.3", version_latest: "2026.9.4" }), "system.core");
@@ -552,7 +605,7 @@ const cenarios = [
     nome: "O carteiro das cópias continua a entregar uma cópia (url → PUT → done), uma vez só",
     async correr(v) {
       const nome = "automatic_backup_2026_09_28_03_00.tar";
-      const casa = novaCasa({ backups: { "5a1b2c3d.tar": Buffer.alloc(100, 1), [nome]: Buffer.alloc(4096, 7) } });
+      const casa = novaCasa({ backups: { "5a1b2c3d.tar": Buffer.alloc(100, 1), [nome]: { corpo: Buffer.alloc(4096, 7), mtime: Math.floor(Date.now() / 1000) - 3600 } } });
       const done = await esperar(() => relay.pedidos.find((p) => p.caminho === `/backup/${UUID}/done`), 20000);
       const url = relay.pedidos.find((p) => p.caminho === `/backup/${UUID}/url`);
       const put = relay.pedidos.find((p) => p.metodo === "PUT");
@@ -924,6 +977,187 @@ const cenarios = [
       const r = docker(["run", "--rm", "-i", "--entrypoint", "sh", IMAGEM, "-s"], `${t}\n`);
       v.ok(r.codigo === 0 && r.stdout.includes("sobreviveu (rc=0)"), `a shell sobreviveu (saída ${r.codigo}: ${r.stdout.trim() || "nada"})`);
       v.ev(`stderr (esperado, o ficheiro não abre): ${r.stderr.trim().replace(/\n/g, " | ")}`);
+    },
+  },
+
+  // 0.3.1: o carteiro só entrega cópias automáticas, e nunca uma que não
+  // seja mais nova do que a última entregue — o incidente de 29 set 2026 na
+  // casa-piloto, em que uma parcial de 20 KB ficou no cofre no lugar da
+  // cópia do dia.
+  {
+    n: 29,
+    nome: "(0.3.1) Em /backup só há cópias parciais de add-ons → não se entrega nenhuma; uma linha no registo, que não se repete na passagem seguinte",
+    async correr(v) {
+      const casa = novaCasa({ backups: emBackup(COPIAS.parcialPiloto, COPIAS.parcialHoje) });
+      const chegou = await depoisDaPassagem(1);
+      v.ok(chegou, `o carteiro passou duas vezes, nos batimentos 0 e 30 (${batimentos().length} batimentos)`);
+      const cofre = doCofre();
+      v.ok(cofre.length === 0, `nenhum pedido ao cofre (${cofre.map((p) => `${p.metodo} ${p.caminho}`).join("; ") || "nenhum"})`);
+      const nenhuma = casa.linhas().filter((l) => l.includes("Nenhuma cópia automática em /backup"));
+      v.ok(nenhuma.length === 1, `uma linha a dizer que não há cópia automática, não uma por passagem (${nenhuma.length})`);
+      v.ok(!casa.existe("last_uploaded"), "$DATA/last_uploaded não foi escrito");
+      v.ev(`/backup: ${COPIAS.parcialPiloto.nome} (${COPIAS.parcialPiloto.bytes} bytes), ${COPIAS.parcialHoje.nome} (${COPIAS.parcialHoje.bytes} bytes)`);
+      v.ev(`${batimentos().length} batimentos (2 passagens do carteiro), ${cofre.length} pedidos ao cofre`);
+      v.linhas(casa, /[Cc]ópia/);
+    },
+  },
+  {
+    n: 30,
+    nome: "(0.3.1) O incidente: a automática entregue sai de /backup e ficam uma parcial e uma automática mais antiga → não se entrega nenhuma; uma linha no registo",
+    async correr(v) {
+      const casa = novaCasa({ backups: emBackup(COPIAS.auto28, COPIAS.auto29, COPIAS.parcialHoje) });
+      const done = await esperar(() => relay.pedidos.find((p) => p.caminho === `/backup/${UUID}/done`), 20000);
+      const put = relay.pedidos.find((p) => p.metodo === "PUT");
+      v.ok(done && put && put.bytes === COPIAS.auto29.bytes,
+        `na passagem 0 entregou a automática de hoje, não a parcial, que é o tar mais recente (PUT de ${put ? qual(put.bytes) : "—"})`);
+      await esperar(() => (casa.ler("last_uploaded") || "").trim() === marca(COPIAS.auto29), 5000);
+      v.ok((casa.ler("last_uploaded") || "").trim() === marca(COPIAS.auto29), "a marca da de hoje ficou em $DATA/last_uploaded");
+      v.ev(`passagem 0: PUT ${put ? qual(put.bytes) : "—"}; $DATA/last_uploaded: ${(casa.ler("last_uploaded") || "").trim()}`);
+      // Outro add-on (na casa-piloto, o Google Drive Backup) tira-a do /backup.
+      casa.tiraCopia(COPIAS.auto29.nome);
+      const chegou = await depoisDaPassagem(2);
+      v.ok(chegou, `o carteiro passou mais duas vezes, nos batimentos 30 e 60 (${batimentos().length} batimentos)`);
+      const cofre = doCofre();
+      v.ok(cofre.length === 3, `nas passagens 30 e 60 não houve pedidos ao cofre (${cofre.length} ao todo; os 3 da entrega da passagem 0)`);
+      const velha = casa.linhas().filter((l) => l.includes("não é mais nova do que a última entregue"));
+      v.ok(velha.length === 1 && velha[0].includes(`(${COPIAS.auto28.nome})`),
+        `uma linha a dizer que a automática de ontem não é mais nova, não uma por passagem (${velha.length})`);
+      v.ok(!casa.linhas().some((l) => l.includes("Nenhuma cópia automática")), "sem a linha de não haver automática (a de ontem está lá)");
+      v.ok((casa.ler("last_uploaded") || "").trim() === marca(COPIAS.auto29), "a marca continua a da cópia de hoje");
+      v.ev(`/backup depois: ${COPIAS.auto28.nome}, ${COPIAS.parcialHoje.nome}`);
+      v.ev(`pedidos ao cofre: ${cofre.map((p) => `${p.metodo} ${p.caminho.replace(UUID, "<uuid>")} ${rel(p.t, cofre[0].t)}`).join(", ") || "nenhum"}; ${batimentos().length} batimentos`);
+      v.linhas(casa, /[Cc]ópia/);
+    },
+  },
+  {
+    n: 31,
+    nome: "(0.3.1) Depois disso aparece uma automática nova → entrega-se",
+    async correr(v) {
+      // Onde o cenário 30 acaba: a de hoje foi entregue e saiu de /backup.
+      const casa = novaCasa({
+        backups: emBackup(COPIAS.auto28, COPIAS.parcialHoje),
+        dados: { last_uploaded: `${marca(COPIAS.auto29)}\n` },
+      });
+      const velha = await esperar(() => casa.linhas().find((l) => l.includes("não é mais nova do que a última entregue")), 20000);
+      v.ok(velha && velha.includes(`(${COPIAS.auto28.nome})`), "na passagem 0 não entregou a automática de ontem");
+      v.ok(doCofre().length === 0, "e não pediu nada ao cofre");
+      // A automática da noite seguinte.
+      casa.poeCopias(emBackup(COPIAS.auto30));
+      const done = await esperar(() => relay.pedidos.find((p) => p.caminho === `/backup/${UUID}/done`), 45000, 500);
+      const puts = relay.pedidos.filter((p) => p.metodo === "PUT");
+      const noBatimento = done ? batimentos().filter((b) => b.t <= done.t).length - 1 : null;
+      v.ok(done && puts.length === 1 && puts[0].bytes === COPIAS.auto30.bytes,
+        `entregou a nova (${puts.map((p) => qual(p.bytes)).join(", ") || "nenhum PUT"})`);
+      v.ok(noBatimento === 30, `na passagem seguinte, a do batimento 30 (${noBatimento})`);
+      await esperar(() => (casa.ler("last_uploaded") || "").trim() === marca(COPIAS.auto30), 5000);
+      v.ok((casa.ler("last_uploaded") || "").trim() === marca(COPIAS.auto30), "a marca passou para a nova");
+      v.ok(casa.linhas().some((l) => l.endsWith(`Cópia entregue: ${COPIAS.auto30.nome}`)), "linha \"Cópia entregue\" no registo");
+      v.ok(casa.linhas().filter((l) => l.includes("não é mais nova")).length === 1, "a linha da de ontem apareceu uma vez só");
+      v.ev(`passagem 30: PUT ${puts.map((p) => qual(p.bytes)).join(", ") || "—"}; $DATA/last_uploaded: ${(casa.ler("last_uploaded") || "").trim()}`);
+      v.linhas(casa, /[Cc]ópia/);
+    },
+  },
+  {
+    n: 32,
+    nome: "(0.3.1) Vinda da 0.3.0: com a marca que ela deixou (na casa-piloto, a da parcial), vazia ou com lixo → entrega a automática mais recente",
+    async correr(v) {
+      const casos = [
+        ["com a marca da 0.3.0 na parcial (o estado real da casa-piloto)", `${marca(COPIAS.parcialPiloto)}\n`],
+        ["com $DATA/last_uploaded vazio", ""],
+        ["com $DATA/last_uploaded com lixo", "isto não é uma marca\n"],
+      ];
+      for (const [como, conteudo] of casos) {
+        const i = relay.pedidos.length;
+        const casa = novaCasa({
+          backups: emBackup(COPIAS.parcialPiloto, COPIAS.auto28, COPIAS.auto29),
+          dados: { last_uploaded: conteudo },
+        });
+        await esperar(() => relay.pedidos.slice(i).find((p) => p.caminho === `/backup/${UUID}/done`), 20000);
+        const puts = relay.pedidos.slice(i).filter((p) => p.metodo === "PUT");
+        v.ok(puts.length === 1 && puts[0].bytes === COPIAS.auto29.bytes,
+          `${como}: entregou a automática mais recente (${puts.map((p) => qual(p.bytes)).join(", ") || "nenhum PUT"})`);
+        await esperar(() => (casa.ler("last_uploaded") || "").trim() === marca(COPIAS.auto29), 5000);
+        v.ok((casa.ler("last_uploaded") || "").trim() === marca(COPIAS.auto29), `${como}: a marca passou para a automática`);
+        v.ok(!casa.linhas().some((l) => l.includes("não é mais nova")), `${como}: sem a linha de não ser mais nova`);
+        v.ev(`${como} (${JSON.stringify(conteudo)}) → PUT ${puts.map((p) => qual(p.bytes)).join(", ") || "—"}; $DATA/last_uploaded: ${(casa.ler("last_uploaded") || "").trim()}`);
+        casa.parar();
+      }
+    },
+  },
+  {
+    n: 33,
+    nome: "(0.3.1) HA antes da 2026.8: a automática chama-se Automatic_backup_2026.7.3_… (A grande, versão com pontos) → entrega-se",
+    async correr(v) {
+      const casa = novaCasa({ backups: emBackup(COPIAS.parcialPiloto, COPIAS.autoAntiga, COPIAS.parcialHoje) });
+      const done = await esperar(() => relay.pedidos.find((p) => p.caminho === `/backup/${UUID}/done`), 20000);
+      const puts = relay.pedidos.filter((p) => p.metodo === "PUT");
+      v.ok(done && puts.length === 1 && puts[0].bytes === COPIAS.autoAntiga.bytes,
+        `entregou a automática, não uma parcial (${puts.map((p) => qual(p.bytes)).join(", ") || "nenhum PUT"})`);
+      await esperar(() => (casa.ler("last_uploaded") || "").trim() === marca(COPIAS.autoAntiga), 5000);
+      v.ok((casa.ler("last_uploaded") || "").trim() === marca(COPIAS.autoAntiga), "a marca ficou na automática");
+      v.ok(!casa.linhas().some((l) => l.includes("Nenhuma cópia automática")), "sem a linha de não haver automática");
+      v.ev(`/backup: ${COPIAS.parcialPiloto.nome}, ${COPIAS.autoAntiga.nome}, ${COPIAS.parcialHoje.nome}`);
+      v.linhas(casa, /[Cc]ópia/);
+    },
+  },
+  {
+    n: 34,
+    nome: "(0.3.1) A última entregue tinha a mtime no futuro (relógio adiantado) → não trava as seguintes",
+    async correr(v) {
+      const casa = novaCasa({
+        backups: emBackup(COPIAS.auto28, COPIAS.auto29),
+        dados: { last_uploaded: `${marca(COPIAS.autoFutura)}
+` },
+      });
+      const done = await esperar(() => relay.pedidos.find((p) => p.caminho === `/backup/${UUID}/done`), 20000);
+      const puts = relay.pedidos.filter((p) => p.metodo === "PUT");
+      v.ok(done && puts.length === 1 && puts[0].bytes === COPIAS.auto29.bytes,
+        `entregou a automática de hoje (${puts.map((p) => qual(p.bytes)).join(", ") || "nenhum PUT"})`);
+      await esperar(() => (casa.ler("last_uploaded") || "").trim() === marca(COPIAS.auto29), 5000);
+      v.ok((casa.ler("last_uploaded") || "").trim() === marca(COPIAS.auto29), "a marca passou para a de hoje");
+      v.ok(!casa.linhas().some((l) => l.includes("não é mais nova")), "sem a linha de não ser mais nova");
+      v.ev(`marca de partida: ${marca(COPIAS.autoFutura)}`);
+      v.linhas(casa, /[Cc]ópia/);
+    },
+  },
+  {
+    n: 35,
+    nome: "(0.3.1) Vinda da 0.3.0 com a marca numa parcial mais nova do que a automática do dia → entrega a automática",
+    async correr(v) {
+      const casa = novaCasa({
+        backups: emBackup(COPIAS.auto29, COPIAS.parcialHoje),
+        dados: { last_uploaded: `${marca(COPIAS.parcialHoje)}
+` },
+      });
+      const done = await esperar(() => relay.pedidos.find((p) => p.caminho === `/backup/${UUID}/done`), 20000);
+      const puts = relay.pedidos.filter((p) => p.metodo === "PUT");
+      v.ok(done && puts.length === 1 && puts[0].bytes === COPIAS.auto29.bytes,
+        `entregou a automática de hoje (${puts.map((p) => qual(p.bytes)).join(", ") || "nenhum PUT"})`);
+      await esperar(() => (casa.ler("last_uploaded") || "").trim() === marca(COPIAS.auto29), 5000);
+      v.ok((casa.ler("last_uploaded") || "").trim() === marca(COPIAS.auto29), "a marca passou para a automática");
+      v.ok(!casa.linhas().some((l) => l.includes("não é mais nova")), "sem a linha de não ser mais nova");
+      v.ev(`marca de partida: ${marca(COPIAS.parcialHoje)} (11:33, a automática é das 03:00)`);
+      v.linhas(casa, /[Cc]ópia/);
+    },
+  },
+  {
+    n: 36,
+    nome: "(0.3.1) Automática mexida há menos de 5 minutos (o Supervisor ainda a escrever) → fica para a passagem seguinte",
+    async correr(v) {
+      const agora = Math.floor(Date.now() / 1000);
+      const corpo = Buffer.alloc(COPIAS.autoFresca.bytes, 1);
+      const casa = novaCasa({ backups: { [COPIAS.autoFresca.nome]: { corpo, mtime: agora - 60 } } });
+      const passou = await depoisDaPassagem(0);
+      v.ok(passou && doCofre().length === 0, `na passagem 0 (a cópia com 1 minuto) não pediu nada ao cofre (${doCofre().length})`);
+      // Acabou de ser escrita: a mtime fica a da última escrita.
+      casa.poeCopias({ [COPIAS.autoFresca.nome]: { corpo, mtime: agora - 600 } });
+      const done = await esperar(() => relay.pedidos.find((p) => p.caminho === `/backup/${UUID}/done`), 45000, 500);
+      const puts = relay.pedidos.filter((p) => p.metodo === "PUT");
+      const noBatimento = done ? batimentos().filter((b) => b.t <= done.t).length - 1 : null;
+      v.ok(done && puts.length === 1 && puts[0].bytes === COPIAS.autoFresca.bytes, `entregou-a (${puts.map((p) => qual(p.bytes)).join(", ") || "nenhum PUT"})`);
+      v.ok(noBatimento === 30, `na passagem seguinte, a do batimento 30 (${noBatimento})`);
+      v.ok(!casa.linhas().some((l) => l.includes("Nenhuma cópia automática") || l.includes("não é mais nova")), "a espera não deixa linhas no registo");
+      v.linhas(casa, /[Cc]ópia/);
     },
   },
 ];

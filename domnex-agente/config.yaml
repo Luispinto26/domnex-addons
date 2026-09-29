@@ -18,7 +18,7 @@
 # A passagem de `local_omnex_backup` para `<hash deste repositório>_omnex_backup`
 # é exatamente essa troca, uma vez e à mão, nas casas que vinham de /addons.
 name: Domnex Agente
-version: "0.3.0"
+version: "0.3.1"
 slug: omnex_backup
 description: Cópias de segurança no cofre da Domnex e gestão remota pela consola
 url: https://github.com/Luispinto26/domnex-addons

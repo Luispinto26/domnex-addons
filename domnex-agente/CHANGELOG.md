@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.3.1 — 2026-09-29
+
+- **O carteiro só entrega cópias automáticas.** Na casa-piloto, a 29 de
+  setembro, outro add-on (o Google Drive Backup) tirou do `/backup` as
+  cópias automáticas do Home Assistant. Sem nenhuma, o carteiro da 0.3.0
+  entregava o tar mais recente que lá houvesse — uma cópia parcial de
+  20 KB, feita pelo HA antes de atualizar o Cloudflared — e, como o cofre
+  guarda uma cópia por dia (`<uuid>/<dia>.tar`), a parcial ficou no lugar
+  da cópia completa desse dia. Agora só vão as `automatic_backup_*.tar`
+  (`Automatic_backup_*.tar`, com A grande, no HA antes da 2026.8); as
+  parciais dos add-ons nunca vão.
+- **E só uma mais nova do que a última entregue.** Se a automática mais
+  recente sair do `/backup`, a que fica à frente é mais antiga, e
+  entregá-la punha uma cópia velha por cima da de hoje. Agora fica onde
+  está, e vai a próxima automática nova. A marca da última entrega só
+  serve de medida se for de uma automática e não estiver no futuro (uma
+  cópia feita com o relógio da casa adiantado travava as seguintes).
+- **Uma cópia mexida há menos de 5 minutos fica para a passagem seguinte.**
+  O Supervisor escreve o tar no sítio final: apanhá-la a meio entregava-a
+  cortada.
+- Duas linhas novas no registo, cada uma dita uma vez e não a cada
+  passagem: `Nenhuma cópia automática em /backup — …` e `A cópia automática
+  em /backup (<ficheiro>) não é mais nova do que a última entregue — …`.
+- A marca da última entrega (`/data/last_uploaded`) tem a forma de sempre:
+  quem vem da 0.3.0 — mesmo com a marca de uma parcial, como a casa-piloto
+  — entrega a automática mais recente normalmente. O batimento, o inventário e
+  os comandos não mudam.
+
 ## 0.3.0 — 2026-09-28
 
 - **Código de instalação.** Uma casa nova já não precisa de segredo colado

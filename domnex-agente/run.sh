@@ -44,7 +44,7 @@ DATA="${DOMNEX_DATA:-/data}"
 CONF="${DOMNEX_CONFIG:-/homeassistant}"
 BACKUP_DIR="${DOMNEX_BACKUP:-/backup}"
 TICK_SECONDS="${DOMNEX_TICK:-60}"
-AGENT_VERSION="0.3.0"
+AGENT_VERSION="0.3.1"
 STATE="$DATA/last_uploaded"
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
@@ -874,18 +874,57 @@ while true; do
 
   # ── O carteiro das cópias, a cada 30 batimentos ──────────────────────────
   if [ $((TICK % 30)) -eq 0 ]; then
-    # As cópias da casa chamam-se "Automatic backup …" (as agendadas e as do
-    # botão da app). Os outros tar em /backup são parciais que o HA faz antes
-    # de atualizar add-ons — não são a casa, e não os queremos no cofre.
-    FILE=$(ls -t "$BACKUP_DIR"/automatic_backup_*.tar 2>/dev/null | head -n 1)
+    # Só as cópias automáticas da casa ("Automatic backup …"). Os outros tar
+    # em /backup são parciais que o HA faz antes de atualizar add-ons — não
+    # são a casa. Até à 0.3.0, sem automática nenhuma, entregava-se o tar
+    # mais recente que houvesse; a 29 set 2026 outro add-on (Google Drive
+    # Backup) tirou as automáticas do /backup e uma parcial de 20 KB ficou no
+    # cofre no lugar da cópia do dia — a chave lá é uma por dia. Sem
+    # automática, não se entrega nada. O "A" grande é o nome do HA antes da
+    # 2026.8 (Automatic_backup_2026.7.3_…); da 2026.8 em diante vem em slug.
+    FILE=$(ls -t "$BACKUP_DIR"/[Aa]utomatic_backup_*.tar 2>/dev/null | head -n 1)
+    MTIME=""
+    [ -n "$FILE" ] && MTIME=$(date -r "$FILE" +%s 2>/dev/null)
+    case $MTIME in
+      '' | *[!0-9]*) FILE="" ;;
+    esac
     if [ -z "$FILE" ]; then
-      FILE=$(ls -t "$BACKUP_DIR"/*.tar 2>/dev/null | head -n 1)
+      [ -n "$SEM_AUTOMATICA" ] || log "Nenhuma cópia automática em /backup — nada para entregar ao cofre (as cópias parciais dos add-ons não vão)."
+      SEM_AUTOMATICA=1
+    else
+      SEM_AUTOMATICA=""
     fi
     if [ -n "$FILE" ] && [ -n "$SECRET" ]; then
       # A marca é nome+mtime: só se entrega cada cópia uma vez, seja qual for
-      # a hora a que o HA a fizer.
-      MARK="$FILE $(date -r "$FILE" +%s)"
-      if [ "$MARK" != "$(cat "$STATE" 2>/dev/null)" ]; then
+      # a hora a que o HA a fizer. E só uma mais nova do que a última
+      # entregue: se a automática mais recente desaparecer do /backup, a que
+      # fica à frente é mais antiga, e entregá-la punha uma cópia velha por
+      # cima da de hoje no cofre.
+      MARK="$FILE $MTIME"
+      ULTIMA=$(cat "$STATE" 2>/dev/null)
+      ULTIMA_T=${ULTIMA##* }
+      case $ULTIMA_T in
+        '' | *[!0-9]*) ULTIMA_T=0 ;;
+      esac
+      # A marca só serve de medida se for de uma automática (a 0.3.0 pode ter
+      # entregue uma parcial, até mais nova do que a automática do dia) e se
+      # não vier do futuro (uma cópia feita com o relógio adiantado travava
+      # todas as seguintes até o relógio lá chegar).
+      case ${ULTIMA% *} in
+        */[Aa]utomatic_backup_*.tar) ;;
+        *) ULTIMA_T=0 ;;
+      esac
+      AGORA=$(date +%s)
+      [ "$ULTIMA_T" -le "$AGORA" ] || ULTIMA_T=0
+      IDADE=$((AGORA - MTIME))
+      if [ "$MARK" != "$ULTIMA" ] && [ "$MTIME" -le "$ULTIMA_T" ]; then
+        [ "$VELHA_DITA" = "$MARK" ] || log "A cópia automática em /backup ($(basename "$FILE")) não é mais nova do que a última entregue — não se entrega."
+        VELHA_DITA=$MARK
+      elif [ "$MARK" != "$ULTIMA" ] && [ "$IDADE" -ge 0 ] && [ "$IDADE" -lt 300 ]; then
+        # Mexida há menos de 5 minutos: o Supervisor escreve o tar no sítio
+        # final, e pode ainda ir a meio. Fica para a passagem seguinte.
+        :
+      elif [ "$MARK" != "$ULTIMA" ]; then
         # Uma casa real passa dos 100 MB que o worker aceita, por isso a
         # entrega é direta ao cofre: pede-se um URL assinado ao relay, faz-se
         # o PUT ao R2, e confirma-se no fim para a entrega ficar registada.

@@ -15,6 +15,13 @@ O agente local da Domnex numa casa. Faz três coisas, e só estas:
   segurança do Home Assistant e, quando há uma nova, entrega-a ao cofre da
   Domnex. Cada cópia é entregue uma vez. As cópias vão encriptadas pelo
   próprio Home Assistant, com a chave da casa — que nunca viaja com elas.
+  Só vão as cópias automáticas da casa (`automatic_backup_…` em `/backup`,
+  ou `Automatic_backup_…` no Home Assistant antes da 2026.8: as agendadas
+  e as do botão da app), e só uma mais nova do que a última entregue. Uma
+  cópia mexida há menos de 5 minutos espera pela passagem seguinte — pode
+  estar ainda a ser escrita. As parciais que o Home Assistant faz antes de atualizar um
+  add-on nunca vão, e uma automática mais antiga também não: o cofre guarda
+  uma cópia por dia, e qualquer uma delas ficava por cima da desse dia.
 
 Tudo vai autenticado pelo segredo desta casa.
 
@@ -115,7 +122,7 @@ cheio), vai logo direto à consola.
 Um batimento que corre bem não escreve nada. O resto, uma linha por
 acontecimento:
 
-- `Domnex Agente 0.3.0 a arrancar.` — o add-on arrancou, nesta versão.
+- `Domnex Agente 0.3.1 a arrancar.` — o add-on arrancou, nesta versão.
 - `Sem segredo nem código de instalação — …` — as duas opções estão
   vazias; o add-on não faz nada até ter uma.
 - `Sem segredo: a registar a casa na consola com o código de instalação.`
@@ -155,6 +162,19 @@ acontecimento:
 - `Inventário não entregue (…)` — a consola não o recebeu; tenta no
   batimento seguinte (ou no próximo inventário, se a consola o recusou).
 - `Cópia entregue: <ficheiro>` — uma cópia nova chegou ao cofre.
+- `Nenhuma cópia automática em /backup — nada para entregar ao cofre (…).`
+  — não há nenhuma `automatic_backup_…` em `/backup`: as cópias automáticas
+  não estão ligadas no Home Assistant, só vão para fora (o local "Este
+  sistema" não está escolhido), ou outro add-on (o Google Drive Backup, por
+  exemplo) tirou-as de lá. As parciais dos add-ons, as manuais
+  (`custom_backup_…`) e as que outro add-on faz não se entregam. Diz-se uma vez, não a cada passagem; volta a
+  dizer-se se aparecer uma automática e depois deixar de haver.
+- `A cópia automática em /backup (<ficheiro>) não é mais nova do que a
+  última entregue — não se entrega.` — a automática mais recente saiu de
+  `/backup` (outro add-on levou-a) e a que ficou à frente é mais antiga do
+  que a que já está no cofre; não vai, para não ficar por cima da de hoje.
+  Também aparece se o relógio da casa estava atrasado quando a cópia se fez.
+  Uma vez por cópia; a próxima automática nova entrega-se normalmente.
 - `A entrega falhou com <código>` / `O relay não deu URL de entrega` — o
   relay recusou (segredo errado dá 401) ou não respondeu; tenta na passagem
   seguinte, de meia em meia hora.
