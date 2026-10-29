@@ -122,7 +122,7 @@ cheio), vai logo direto à consola.
 Um batimento que corre bem não escreve nada. O resto, uma linha por
 acontecimento:
 
-- `Domnex Agente 0.3.1 a arrancar.` — o add-on arrancou, nesta versão.
+- `Domnex Agente 0.3.2 a arrancar.` — o add-on arrancou, nesta versão.
 - `Sem segredo nem código de instalação — …` — as duas opções estão
   vazias; o add-on não faz nada até ter uma.
 - `Sem segredo: a registar a casa na consola com o código de instalação.`

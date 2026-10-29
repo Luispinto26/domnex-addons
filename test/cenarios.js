@@ -26,7 +26,7 @@ const { criarRelay, UUID, SEGREDO } = require("./relay-falso");
 
 const RAIZ = path.resolve(__dirname, "..");
 const PASTA_ADDON = path.join(RAIZ, "domnex-agente");
-const IMAGEM = process.env.IMAGEM || "domnex-agente:0.3.1-teste";
+const IMAGEM = process.env.IMAGEM || "domnex-agente:0.3.2-teste";
 const BASE = process.env.BUILD_FROM || "ghcr.io/home-assistant/amd64-base:latest";
 const HOST = process.env.HOST_DOCKER || "host.docker.internal";
 const CODIGO = "INST-ABCD-EFGH";
@@ -121,6 +121,7 @@ function novaCasa({ secret = SEGREDO, code = "", backups = {}, dados = {}, semIn
     "-e", `DOMNEX_RELAY=http://${HOST}:${PORTA_RELAY}`,
     "-e", `DOMNEX_SUPERVISOR=http://${HOST}:${PORTA_SUP}`,
     "-e", "DOMNEX_TICK=1",
+    "-e", "DOMNEX_CARTEIRO=30",
     "-e", `SUPERVISOR_TOKEN=${TOKEN}`,
     ...(semInodes
       ? ["--tmpfs", `/data:rw,size=1m,nr_inodes=${inodes}`, "-v", `${data}:/semente:ro`]
@@ -286,7 +287,7 @@ const cenarios = [
       await esperar(() => pedidosSup("POST", "/core/update").length && batimentos().length >= 6, 20000);
       v.ok(relay.pedidos.every((p) => p.segredo !== velho), "com segredo nas opções e em /data/secret, ganha o das opções");
       const b = batimentos()[0];
-      v.ok(b && isDeepStrictEqual(json(b.corpo), { version: "2026.9.3", latest: "2026.9.4", agent: "0.3.1" }),
+      v.ok(b && isDeepStrictEqual(json(b.corpo), { version: "2026.9.3", latest: "2026.9.4", agent: "0.3.2" }),
         "corpo do batimento = {version, latest, agent}");
       v.ok(b && chaves(json(b.corpo)) === "agent,latest,version", "sem campos a mais no batimento");
       v.ok(b && b.segredo === SEGREDO && b.tipo === "application/json", "x-backup-secret e content-type certos");
@@ -319,7 +320,7 @@ const cenarios = [
       if (!j) return;
       v.ok(inv.segredo === SEGREDO && inv.tipo === "application/json", "com o segredo e como application/json");
       v.ok(chaves(j) === "addons,agent,collected_at,integrations,system,updates,usb", `chaves de topo: ${chaves(j)}`);
-      v.ok(j.agent === "0.3.1" && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(j.collected_at), "agent e collected_at");
+      v.ok(j.agent === "0.3.2" && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(j.collected_at), "agent e collected_at");
       const s = j.system || {};
       v.ok(chaves(s) === "arch,core,host,ipv4,machine,os,supervisor", `chaves de system: ${chaves(s)}`);
       v.ok(isDeepStrictEqual(s.core, { version: "2026.9.3", version_latest: "2026.9.4" }), "system.core");

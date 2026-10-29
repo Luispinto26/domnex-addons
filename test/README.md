@@ -13,7 +13,7 @@ recente. Da raiz do repositório:
 node test/cenarios.js
 ```
 
-Constrói a imagem `domnex-agente:0.3.1-teste` a partir de `domnex-agente/`
+Constrói a imagem `domnex-agente:0.3.2-teste` a partir de `domnex-agente/`
 (base `ghcr.io/home-assistant/amd64-base:latest`) e corre os cenários um a
 um. Demora uns 9 minutos. Sai com 0 se todos passarem.
 
