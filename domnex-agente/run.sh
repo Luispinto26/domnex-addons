@@ -44,7 +44,9 @@ DATA="${DOMNEX_DATA:-/data}"
 CONF="${DOMNEX_CONFIG:-/homeassistant}"
 BACKUP_DIR="${DOMNEX_BACKUP:-/backup}"
 TICK_SECONDS="${DOMNEX_TICK:-60}"
-AGENT_VERSION="0.3.1"
+# O carteiro passa de CARTEIRO_TICKS em CARTEIRO_TICKS batimentos (10 min).
+CARTEIRO_TICKS="${DOMNEX_CARTEIRO:-10}"
+AGENT_VERSION="0.3.2"
 STATE="$DATA/last_uploaded"
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
@@ -872,8 +874,8 @@ while true; do
     fi
   fi
 
-  # ── O carteiro das cópias, a cada 30 batimentos ──────────────────────────
-  if [ $((TICK % 30)) -eq 0 ]; then
+  # ── O carteiro das cópias, a cada $CARTEIRO_TICKS batimentos (10 min) ───
+  if [ $((TICK % CARTEIRO_TICKS)) -eq 0 ]; then
     # Só as cópias automáticas da casa ("Automatic backup …"). Os outros tar
     # em /backup são parciais que o HA faz antes de atualizar add-ons — não
     # são a casa. Até à 0.3.0, sem automática nenhuma, entregava-se o tar

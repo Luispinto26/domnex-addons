@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2 — 2026-10-29
+
+- **O carteiro passa de 10 em 10 minutos** (era de 30 em 30): a cópia
+  automática do dia chega ao cofre mais cedo. Ler o `/backup` não custa
+  quase nada.
+
 ## 0.3.1 — 2026-09-29
 
 - **O carteiro só entrega cópias automáticas.** Na casa-piloto, a 29 de
