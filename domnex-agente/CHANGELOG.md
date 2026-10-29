@@ -2,6 +2,7 @@
 
 ## 0.3.2 — 2026-10-29
 
+- **Logótipos novos da Domnex** no ícone e no logo do add-on.
 - **O carteiro passa de 10 em 10 minutos** (era de 30 em 30): a cópia
   automática do dia chega ao cofre mais cedo. Ler o `/backup` não custa
   quase nada.
