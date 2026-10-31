@@ -18,6 +18,12 @@
 # — O carteiro das cópias: de meia em meia hora (30 batimentos) espreita
 #   /backup e, quando o HA tiver uma cópia nova, entrega-a ao cofre.
 #
+# — O painel (desde a 0.4.0): de minuto em minuto avalia no Core o molde do
+#   painel (o estado de cada equipamento: ligação, pilha, sinal, temperatura
+#   interna, firmware…, e os recursos do servidor) e manda-o ao relay quando
+#   alguma coisa que conta mudou, e de 15 em 15 minutos de qualquer forma.
+#   É o que a página assistentes.domnex.pt mostra.
+#
 # O uuid lê-se do próprio HA. O segredo nasce na consola: numa casa nova o
 # instalador escreve na configuração o código de instalação, e o agente
 # troca-o sozinho pelo segredo da casa (guarda-o em /data/secret, onde só o
@@ -46,7 +52,12 @@ BACKUP_DIR="${DOMNEX_BACKUP:-/backup}"
 TICK_SECONDS="${DOMNEX_TICK:-60}"
 # O carteiro passa de CARTEIRO_TICKS em CARTEIRO_TICKS batimentos (10 min).
 CARTEIRO_TICKS="${DOMNEX_CARTEIRO:-10}"
-AGENT_VERSION="0.3.2"
+# O painel (0.4.0): avalia-se de PAINEL_TICKS em PAINEL_TICKS batimentos
+# (1 = cada minuto) e manda-se quando muda; de PAINEL_REFRESH em
+# PAINEL_REFRESH batimentos (15 min) manda-se de qualquer forma.
+PAINEL_TICKS="${DOMNEX_PAINEL:-1}"
+PAINEL_REFRESH="${DOMNEX_PAINEL_REFRESH:-15}"
+AGENT_VERSION="0.4.0"
 STATE="$DATA/last_uploaded"
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
@@ -763,6 +774,151 @@ enviar_inventario() {
   esac
 }
 
+# ── O painel ──────────────────────────────────────────────────────────────
+# O molde devolve um objeto JSON (v = 1) com o sistema, o backup, as
+# atualizações e um item por equipamento. Sai da casa só o que o molde
+# escolhe: nomes, divisões, modelos, firmware, estado, pilha, sinal,
+# temperatura interna do próprio aparelho, tempo a funcionar, reinício
+# necessário, sobreaquecimento, Shelly cloud, filtro do AC. Os telemóveis
+# (mobile_app) e os serviços ficam de fora; IPs, MACs e tokens nunca entram.
+# O relay volta a escolher campo a campo — nunca confia no que vem da casa.
+molde_painel() {
+  cat <<'EOF'
+{#- Painel DOMNEX (assistentes.domnex.pt) — devolve UM objeto JSON com o estado da casa. Só leitura. -#}
+{%- set ns = namespace(devs=[], out=[]) -%}
+{%- for s in states -%}{%- set d = device_id(s.entity_id) -%}{%- if d and d not in ns.devs -%}{%- set ns.devs = ns.devs + [d] -%}{%- endif -%}{%- endfor -%}
+{%- for d in ns.devs -%}
+{%- if 'service' not in (device_attr(d,'entry_type')|string|lower) -%}
+{%- set ids = device_attr(d,'identifiers')|list -%}
+{%- set rede = (ids|first)[0] if ids else '' -%}
+{%- if rede == 'mqtt' and 'zigbee2mqtt' in ((ids|first)[1]|string) -%}{%- set rede = 'zigbee2mqtt' -%}{%- endif -%}
+{%- if rede not in ['mobile_app'] -%}
+{%- set e = namespace(un=0, n=0, since=none, bat=none, lqi=none, rssi=none, t=none, fwn=none, up=none, rr=none, sa=[], cl=none, fil=none, ue=false) -%}
+{%- for x in device_entities(d) -%}
+{%- set dom = x.split('.')[0] -%}
+{%- set st = states(x) -%}
+{%- set dc = state_attr(x,'device_class') -%}
+{%- if dom not in ['update','button','event','scene','notify','image','text','select','number'] -%}
+{%- set e.n = e.n + 1 -%}
+{%- if st == 'unavailable' -%}{%- set e.un = e.un + 1 -%}{%- if not e.since -%}{%- set e.since = (states[x].last_changed|as_local).strftime('%d/%m %H:%M') -%}{%- endif -%}{%- endif -%}
+{%- endif -%}
+{%- if st not in ['unavailable','unknown'] -%}
+{%- if dom == 'sensor' -%}
+{%- if dc == 'battery' and st|is_number -%}{%- set e.bat = st|float -%}{%- endif -%}
+{%- if ('linkquality' in x or x.endswith('_lqi')) and st|is_number -%}{%- set e.lqi = st|float -%}
+{%- elif (dc == 'signal_strength' or x.endswith('_rssi')) and st|is_number and e.rssi is none -%}{%- set e.rssi = st|float -%}{%- endif -%}
+{%- if dc == 'temperature' and st|is_number and ('device' in x or 'internal' in x or 'cpu' in x or 'chip' in x or 'processor' in x or 'mcu' in x or 'dispositivo' in x or (rede in ['shelly','esphome'] and 'h&t' not in (device_attr(d,'model')|string|lower))) -%}{%- set e.t = st|float -%}{%- endif -%}
+{%- if 'uptime' in x and dc == 'timestamp' and as_datetime(st) -%}{%- set e.up = ((now() - as_datetime(st)).total_seconds() / 86400)|round(1) -%}{%- endif -%}
+{%- if 'filter' in x or 'filtro' in x -%}{%- set e.fil = st -%}{%- endif -%}
+{%- endif -%}
+{%- if dom == 'binary_sensor' -%}
+{%- if 'restart_required' in x -%}{%- set e.rr = (st == 'on') -%}{%- endif -%}
+{%- if 'overheat' in x or 'overtemp' in x -%}{%- set e.sa = e.sa + [st == 'on'] -%}{%- endif -%}
+{%- if x.endswith('_cloud') -%}{%- set e.cl = (st == 'on') -%}{%- endif -%}
+{%- if 'filter' in x or 'filtro' in x -%}{%- set e.fil = ('limpar' if st == 'on' else 'ok') -%}{%- endif -%}
+{%- endif -%}
+{%- endif -%}
+{%- if dom == 'update' -%}{%- set e.ue = true -%}{%- if st == 'on' -%}{%- set e.fwn = state_attr(x,'latest_version') -%}{%- endif -%}{%- endif -%}
+{%- endfor -%}
+{%- set estado = 'off' if (e.n > 0 and e.un == e.n) else ('parcial' if e.un > 0 else 'ok') -%}
+{%- set ns.out = ns.out + [{'n': device_attr(d,'name_by_user') or device_attr(d,'name'), 'a': area_name(d) or '', 'r': rede, 'm': device_attr(d,'model') or '', 'e': estado, 'un': e.un, 'tot': e.n, 'desde': e.since, 'bat': e.bat, 'lqi': e.lqi, 'rssi': e.rssi, 't': e.t, 'fw': device_attr(d,'sw_version') or '', 'fwn': e.fwn, 'ue': e.ue, 'up': e.up, 'rr': e.rr, 'sa': (e.sa|select|list|count > 0) if e.sa else none, 'cl': e.cl, 'fil': e.fil}] -%}
+{%- endif -%}
+{%- endif -%}
+{%- endfor -%}
+{%- set sis = namespace(cpu_core=none, mem_core=none, cpu_sup=none, mem_sup=none, disco_livre=none, disco_pct=none, hub_t=none, alim=none) -%}
+{%- for s in states.sensor -%}
+{%- set x = s.entity_id -%}{%- set ok = s.state|is_number -%}
+{%- if ok and 'core_cpu_percent' in x -%}{%- set sis.cpu_core = s.state|float -%}{%- endif -%}
+{%- if ok and 'core_memory_percent' in x -%}{%- set sis.mem_core = s.state|float -%}{%- endif -%}
+{%- if ok and 'supervisor_cpu_percent' in x -%}{%- set sis.cpu_sup = s.state|float -%}{%- endif -%}
+{%- if ok and 'supervisor_memory_percent' in x -%}{%- set sis.mem_sup = s.state|float -%}{%- endif -%}
+{%- if ok and x.endswith('disk_free') -%}{%- set sis.disco_livre = s.state|float -%}{%- endif -%}
+{%- if ok and (x.endswith('disk_use') or x.endswith('disk_usage') or x.endswith('disk_use_percent')) -%}{%- set sis.disco_pct = s.state|float -%}{%- endif -%}
+{%- if ok and s.attributes.device_class == 'temperature' and ('cpu' in x or 'processor' in x) -%}{%- set sis.hub_t = s.state|float -%}{%- endif -%}
+{%- endfor -%}
+{%- for s in states.binary_sensor if 'rpi_power' in s.entity_id or 'power_status' in s.entity_id -%}{%- set sis.alim = ('problema' if s.state == 'on' else 'ok') -%}{%- endfor -%}
+{%- set ver = namespace(core=none, core_n=none, os=none, os_n=none, sup=none, sup_n=none) -%}
+{%- for s in states.update -%}
+{%- set x = s.entity_id -%}{%- set nova = s.attributes.latest_version if s.state == 'on' else none -%}
+{%- if 'home_assistant_core' in x -%}{%- set ver.core = s.attributes.installed_version -%}{%- set ver.core_n = nova -%}{%- endif -%}
+{%- if 'home_assistant_operating_system' in x -%}{%- set ver.os = s.attributes.installed_version -%}{%- set ver.os_n = nova -%}{%- endif -%}
+{%- if 'home_assistant_supervisor' in x -%}{%- set ver.sup = s.attributes.installed_version -%}{%- set ver.sup_n = nova -%}{%- endif -%}
+{%- endfor -%}
+{%- set up = namespace(l=[]) -%}
+{%- for s in states.update | selectattr('state','eq','on') -%}{%- set up.l = up.l + [{'n': s.name, 'de': s.attributes.installed_version, 'para': s.attributes.latest_version}] -%}{%- endfor -%}
+{%- set bk = namespace(ok=none, tent=none) -%}
+{%- for x in integration_entities('backup') -%}
+{%- if 'last_successful' in x and as_datetime(states(x)) -%}{%- set bk.ok = (as_datetime(states(x))|as_local).isoformat() -%}{%- endif -%}
+{%- if 'last_attempted' in x and as_datetime(states(x)) -%}{%- set bk.tent = (as_datetime(states(x))|as_local).isoformat() -%}{%- endif -%}
+{%- endfor -%}
+{{ {'v': 1, 'gerado_ha': now().isoformat(), 'sistema': {'ha': ver.core, 'ha_nova': ver.core_n, 'os': ver.os, 'os_nova': ver.os_n, 'sup': ver.sup, 'sup_nova': ver.sup_n, 'cpu_core': sis.cpu_core, 'mem_core': sis.mem_core, 'cpu_sup': sis.cpu_sup, 'mem_sup': sis.mem_sup, 'disco_livre_gb': sis.disco_livre, 'disco_pct': sis.disco_pct, 'hub_temp': sis.hub_t, 'alimentacao': sis.alim}, 'backup': {'ultimo_ok': bk.ok, 'ultima_tentativa': bk.tent}, 'atualizacoes': up.l, 'disp': ns.out} | tojson }}
+EOF
+}
+
+# Avalia e, se for caso disso, manda. Os valores que mexem a cada minuto
+# (CPU, memória, sinal, temperaturas, tempo a funcionar) ficam de fora da
+# comparação — com eles, mandava-se tudo de minuto a minuto; chegam no envio
+# completo, de PAINEL_REFRESH em PAINEL_REFRESH batimentos.
+# Devolve 0 tratado (mandado, ou sem mudanças); 1 não entregue, tenta no
+# batimento seguinte; 2 o Core em baixo, tenta 5 batimentos depois; 3 o
+# molde ou o relay recusaram, tenta no próximo envio completo. Um relay
+# anterior à rota /painel responde 400: é o 3, e o agente não insiste de
+# minuto a minuto.
+enviar_painel() {
+  _d=$(mktemp -d)
+  molde_painel | jq -Rsc '{template: .}' > "$_d/molde"
+  _ph=$(sup /core/api/template -m 30 -X POST -H "content-type: application/json" --data-binary "@$_d/molde")
+  case $_ph in
+    2??) ;;
+    502 | 503 | 504 | 000)
+      rm -rf "$_d"
+      return 2
+      ;;
+    *)
+      [ "$_ph" = "$PAINEL_ERRO" ] || log "O molde do painel falhou no Core ($(motivo "$_ph")) — tenta no próximo envio completo."
+      PAINEL_ERRO=$_ph
+      rm -rf "$_d"
+      return 3
+      ;;
+  esac
+  if ! jq -ce 'objects | select(.v == 1)' "$CORPO" > "$_d/painel" 2>/dev/null; then
+    [ "$PAINEL_ERRO" = "forma" ] || log "O molde do painel não devolveu o objeto esperado — tenta no próximo envio completo."
+    PAINEL_ERRO=forma
+    rm -rf "$_d"
+    return 3
+  fi
+  _phash=$(jq -c 'del(.gerado_ha)
+    | .sistema |= (if type == "object" then del(.cpu_core, .mem_core, .cpu_sup, .mem_sup) else . end)
+    | .disp |= (if type == "array" then map(if type == "object" then del(.lqi, .rssi, .t, .up) else . end) else . end)' \
+    "$_d/painel" 2>/dev/null | sha256sum | cut -c1-64)
+  if [ "$_phash" = "$PAINEL_HASH" ] && [ "$TICK" -lt "$PAINEL_COMPLETO" ]; then
+    rm -rf "$_d"
+    return 0
+  fi
+  jq -c --arg agent "$AGENT_VERSION" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{agent: $agent, collected_at: $at, painel: .}' "$_d/painel" > "$_d/corpo" 2>/dev/null
+  _ph=$(relay "/agent/$UUID/painel" -m 30 -X POST -H "content-type: application/json" --data-binary "@$_d/corpo")
+  rm -rf "$_d"
+  case $_ph in
+    2??)
+      PAINEL_HASH=$_phash
+      PAINEL_COMPLETO=$((TICK + PAINEL_REFRESH))
+      PAINEL_ERRO=""
+      return 0
+      ;;
+    429 | 5?? | 000)
+      [ "$_ph" = "$PAINEL_ERRO" ] || log "Painel não entregue ($(motivo "$_ph")) — tenta no batimento seguinte."
+      PAINEL_ERRO=$_ph
+      return 1
+      ;;
+    *)
+      [ "$_ph" = "$PAINEL_ERRO" ] || log "Painel não entregue ($(motivo "$_ph")) — tenta no próximo envio completo."
+      PAINEL_ERRO=$_ph
+      return 3
+      ;;
+  esac
+}
+
 # ── O batimento ───────────────────────────────────────────────────────────
 batimento() {
   # A versão vem do Supervisor a cada batimento — é ele que sabe também
@@ -847,6 +1003,10 @@ REGISTO_ERRO=""
 REGISTO_INCERTO=""
 RESULTADO_ERRO=""
 INV_ERRO=""
+PAINEL_AT=0
+PAINEL_HASH=""
+PAINEL_COMPLETO=0
+PAINEL_ERRO=""
 while true; do
   if [ -z "$SECRET" ] && [ -n "$CODIGO_INST" ] && [ -n "$UUID" ] && [ -z "$REGISTO_PARADO" ]; then
     registar
@@ -864,13 +1024,26 @@ while true; do
     # recolhê-lo custa ao Pi uma dúzia de pedidos ao Supervisor e um molde
     # no Core — de minuto a minuto, numa falha de horas. Fica para o
     # primeiro batimento que passe.
-    if batimento && [ "$TICK" -ge "$INV_AT" ]; then
-      enviar_inventario
-      case $? in
-        0 | 3) INV_AT=$((TICK + 60)) ;;
-        1) INV_AT=$((TICK + 1)) ;;
-        2) INV_AT=$((TICK + 5)) ;;
-      esac
+    # O painel vem a seguir, com a mesma regra: só depois de um batimento
+    # que passou.
+    if batimento; then
+      if [ "$TICK" -ge "$INV_AT" ]; then
+        enviar_inventario
+        case $? in
+          0 | 3) INV_AT=$((TICK + 60)) ;;
+          1) INV_AT=$((TICK + 1)) ;;
+          2) INV_AT=$((TICK + 5)) ;;
+        esac
+      fi
+      if [ "$TICK" -ge "$PAINEL_AT" ]; then
+        enviar_painel
+        case $? in
+          0) PAINEL_AT=$((TICK + PAINEL_TICKS)) ;;
+          1) PAINEL_AT=$((TICK + 1)) ;;
+          2) PAINEL_AT=$((TICK + 5)) ;;
+          3) PAINEL_AT=$((TICK + PAINEL_REFRESH)) ;;
+        esac
+      fi
     fi
   fi
 

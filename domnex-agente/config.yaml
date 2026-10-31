@@ -1,3 +1,6 @@
+# A 0.4.0 junta o painel: o estado dos equipamentos, de minuto a minuto e só
+# quando muda, para a página assistentes.domnex.pt (ver DOCS.md).
+#
 # O agente local da Domnex: entrega a cópia diária ao cofre e mantém o
 # batimento com a consola (versão do HA, reiniciar/atualizar à distância).
 # A 0.3.0 junta-lhe a frota: manda à consola o inventário da casa (Core, SO,
@@ -18,7 +21,7 @@
 # A passagem de `local_omnex_backup` para `<hash deste repositório>_omnex_backup`
 # é exatamente essa troca, uma vez e à mão, nas casas que vinham de /addons.
 name: Domnex Agente
-version: "0.3.2"
+version: "0.4.0"
 slug: omnex_backup
 description: Cópias de segurança no cofre da Domnex e gestão remota pela consola
 url: https://github.com/Luispinto26/domnex-addons

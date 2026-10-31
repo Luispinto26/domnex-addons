@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.0 — por publicar
+
+- **O painel.** De minuto em minuto o agente avalia no Core o estado dos
+  equipamentos (ligação, pilha, sinal, temperatura interna, firmware, tempo
+  a funcionar, reinício necessário, sobreaquecimento, Shelly cloud, filtro
+  do AC) e os recursos do servidor, e manda-o à consola em
+  `/agent/<uuid>/painel`, para a página assistentes.domnex.pt.
+- **Só quando muda.** Manda quando alguma coisa que conta mudou e, de
+  qualquer forma, de 15 em 15 minutos; CPU, memória, sinal, temperaturas e
+  tempo a funcionar não contam para a comparação.
+- **Compatível com o relay antigo.** Sem a rota nova o relay responde 400:
+  o agente escreve uma linha e não insiste de minuto a minuto.
+- Não precisa de permissões novas (`homeassistant_api` já cobre o
+  `/core/api/template`).
+
 ## 0.3.2 — 2026-10-29
 
 - **Logótipos novos da Domnex** no ícone e no logo do add-on.

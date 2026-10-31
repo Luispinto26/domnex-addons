@@ -18,9 +18,35 @@ const http = require("http");
 
 const TOKEN = "token-de-teste";
 
+// O que o molde do painel (0.4.0) devolve numa casa pequena: a forma do
+// painel.j2 (v = 1), com três equipamentos — um Zigbee, um Shelly e um
+// sensor a pilha.
+function painelExemplo() {
+  return {
+    v: 1,
+    gerado_ha: "2026-10-30T22:00:00+00:00",
+    sistema: { ha: "2026.9.3", ha_nova: "2026.9.4", os: "18.2", os_nova: "18.3", sup: "2026.09.2", sup_nova: null,
+      cpu_core: 1.2, mem_core: 28.9, cpu_sup: 0.1, mem_sup: 6.0, disco_livre_gb: 16.9, disco_pct: null, hub_temp: 45.8, alimentacao: "ok" },
+    backup: { ultimo_ok: "2026-10-30T05:00:33+00:00", ultima_tentativa: "2026-10-30T04:59:33+00:00" },
+    atualizacoes: [{ n: "Home Assistant Core Update", de: "2026.9.3", para: "2026.9.4" }],
+    disp: [
+      { n: "Luz Sala", a: "Sala", r: "zha", m: "Mini1", e: "ok", un: 0, tot: 4, desde: null, bat: null, lqi: 120, rssi: -70,
+        t: null, fw: "0x020000ff", fwn: null, ue: true, up: null, rr: null, sa: null, cl: null, fil: null },
+      { n: "Tomada Cozinha", a: "Cozinha", r: "shelly", m: "Shelly Plug M Gen3", e: "ok", un: 0, tot: 13, desde: null, bat: null,
+        lqi: null, rssi: -62, t: 47.3, fw: "20261026-151233/2.1.1-g07e9ad2", fwn: null, ue: true, up: 3.2, rr: false, sa: false, cl: false, fil: null },
+      { n: "Sensor Porta", a: "Entrada", r: "zha", m: "SNZB-04PR2", e: "ok", un: 0, tot: 4, desde: null, bat: 100, lqi: 240, rssi: -40,
+        t: null, fw: "0x00001001", fwn: null, ue: false, up: null, rr: null, sa: null, cl: null, fil: null },
+    ],
+  };
+}
+
 function estadoInicial() {
   const agoraUs = Date.now() * 1000;
   return {
+    // O molde do painel: o objeto que o Core devolve (texto, como no Core
+    // real), ou {status, message} em painelErro para o Core o recusar.
+    painel: painelExemplo(),
+    painelErro: null,
     token: TOKEN,
     // Enquanto for true, tudo o que é /core/api/* responde 502 — é o que o
     // proxy do Supervisor faz quando o Core não está RUNNING.
@@ -167,6 +193,11 @@ function criarSupervisor() {
       if (metodo === "POST" && resto === "template") {
         let t;
         try { t = JSON.parse(corpo).template; } catch { return jsonCore(400, { message: "Invalid JSON specified." }); }
+        // O molde do painel (0.4.0) reconhece-se pelo comentário do topo.
+        if (typeof t === "string" && t.includes("Painel DOMNEX")) {
+          if (s.painelErro) return jsonCore(s.painelErro.status, { message: s.painelErro.message });
+          return { status: 200, tipo: "text/plain; charset=utf-8", corpo: typeof s.painel === "string" ? s.painel : JSON.stringify(s.painel) };
+        }
         if (typeof t !== "string" || !t.includes("states.update") || !t.includes("tojson")) {
           return jsonCore(400, { message: "Error rendering template: molde inesperado" });
         }
@@ -308,7 +339,8 @@ function criarSupervisor() {
   return sup;
 }
 
-module.exports = { criarSupervisor, TOKEN };
+module.exports = {
+  painelExemplo, criarSupervisor, TOKEN };
 
 if (require.main === module) {
   const porta = Number(process.env.PORTA || 18432);

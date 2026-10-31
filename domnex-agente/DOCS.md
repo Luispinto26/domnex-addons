@@ -36,12 +36,35 @@ Tudo vai autenticado pelo segredo desta casa.
   versões, estado, repositório); as integrações (só o domínio, o estado, a
   origem e se estão desligadas); as atualizações pendentes, como o Home
   Assistant as mostra; e as pens USB série (caminho, fabricante, modelo).
+- No painel (desde a 0.4.0): um item por equipamento — o nome e a divisão
+  como estão no Home Assistant, o modelo, a integração, a versão do
+  firmware (e a nova, se houver), se está ligado, sem ligação ou em parte,
+  a pilha, o sinal (LQI/RSSI), a temperatura interna do próprio aparelho,
+  há quanto tempo está a funcionar, se pede reinício, se sobreaqueceu, se a
+  Shelly cloud está ligada e o estado do filtro do AC; e, do servidor, as
+  versões, CPU e memória do Core e do Supervisor, o disco, a temperatura
+  do processador, a alimentação do Pi e as datas da última cópia. Os
+  nomes dos equipamentos saem como estão no HA — se tiverem nomes de
+  pessoas, saem com eles.
 - O resultado de cada comando, e o ficheiro da cópia.
 
 **Não sai**: as opções dos add-ons (palavras-passe incluídas — o agente lê
 a lista de add-ons, que não as traz, e nunca a ficha de cada um), o nome
 que cada integração tem no Home Assistant (pode ter o email do cliente),
-entidades, estados, histórico, automações.
+os telemóveis (`mobile_app`), IPs e MACs dos equipamentos, valores de
+sensores de ambiente, histórico, automações.
+
+## O painel
+
+Desde a 0.4.0 o agente avalia de minuto a minuto, no Core, o molde do
+painel e manda o resultado à consola (`/agent/<uuid>/painel`) — é o que a
+página assistentes.domnex.pt mostra. Para não escrever na consola de
+minuto a minuto, só manda quando alguma coisa que conta mudou (um
+equipamento caiu ou voltou, uma pilha mudou, apareceu uma atualização…);
+CPU, memória, sinal, temperaturas e tempo a funcionar não contam para essa
+comparação e seguem no envio completo, de 15 em 15 minutos. Um relay que
+ainda não tenha a rota responde 400: o agente escreve uma linha e tenta de
+novo só no envio completo seguinte.
 
 ## Instalar
 
@@ -122,7 +145,7 @@ cheio), vai logo direto à consola.
 Um batimento que corre bem não escreve nada. O resto, uma linha por
 acontecimento:
 
-- `Domnex Agente 0.3.2 a arrancar.` — o add-on arrancou, nesta versão.
+- `Domnex Agente 0.4.0 a arrancar.` — o add-on arrancou, nesta versão.
 - `Sem segredo nem código de instalação — …` — as duas opções estão
   vazias; o add-on não faz nada até ter uma.
 - `Sem segredo: a registar a casa na consola com o código de instalação.`
@@ -183,6 +206,15 @@ acontecimento:
   executar.
 
 O segredo e o código nunca aparecem no registo.
+
+- `O molde do painel falhou no Core (<motivo>) — tenta no próximo envio
+  completo.` / `O molde do painel não devolveu o objeto esperado — …` — o
+  Core recusou ou estragou o molde do painel (uma versão do HA que mudou
+  alguma função dos moldes). O resto do agente continua.
+- `Painel não entregue (<motivo>) — tenta no batimento seguinte.` (sem
+  rede, 429, 5xx) ou `… — tenta no próximo envio completo.` (400/404/413:
+  um relay sem a rota do painel, ou um painel recusado). Cada uma só
+  aparece de novo se o motivo mudar.
 
 ## Mudar uma casa da instalação local para esta
 

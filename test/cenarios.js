@@ -21,12 +21,12 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { isDeepStrictEqual } = require("util");
-const { criarSupervisor, TOKEN } = require("./supervisor-falso");
+const { criarSupervisor, TOKEN, painelExemplo } = require("./supervisor-falso");
 const { criarRelay, UUID, SEGREDO } = require("./relay-falso");
 
 const RAIZ = path.resolve(__dirname, "..");
 const PASTA_ADDON = path.join(RAIZ, "domnex-agente");
-const IMAGEM = process.env.IMAGEM || "domnex-agente:0.3.2-teste";
+const IMAGEM = process.env.IMAGEM || "domnex-agente:0.4.0-teste";
 const BASE = process.env.BUILD_FROM || "ghcr.io/home-assistant/amd64-base:latest";
 const HOST = process.env.HOST_DOCKER || "host.docker.internal";
 const CODIGO = "INST-ABCD-EFGH";
@@ -70,6 +70,14 @@ const batimentos = () => relay.pedidos.filter((p) => p.caminho === `/agent/${UUI
 const inventarios = () => relay.pedidos.filter((p) => p.caminho === `/agent/${UUID}/inventory` && naoCaiu(p));
 const resultados = (id) => relay.pedidos.filter((p) => p.caminho === `/agent/${UUID}/commands/${id}` && naoCaiu(p));
 const pedidosSup = (metodo, caminho) => sup.pedidos.filter((p) => p.metodo === metodo && p.caminho === caminho);
+// Os moldes que o agente manda ao Core: o do inventário e, desde a 0.4.0, o
+// do painel (reconhece-se pelo comentário do topo).
+const ehMoldePainel = (p) => ((json(p.corpo) || {}).template || "").includes("Painel DOMNEX");
+const moldesInventario = () => pedidosSup("POST", "/core/api/template").filter((p) => !ehMoldePainel(p));
+const moldesPainel = () => pedidosSup("POST", "/core/api/template").filter(ehMoldePainel);
+const paineis = () => relay.pedidos.filter((p) => p.caminho === `/agent/${UUID}/painel` && naoCaiu(p));
+// O número do batimento (0, 1, …) em que saiu um pedido ao relay.
+const noBatimento = (p) => batimentos().filter((b) => b.t <= p.t).length - 1;
 const addonFalso = (slug) => sup.estado.addons.find((a) => a.slug === slug);
 const doCofre = () => relay.pedidos.filter((p) => p.caminho.startsWith(`/backup/${UUID}/`) || p.metodo === "PUT");
 
@@ -287,7 +295,7 @@ const cenarios = [
       await esperar(() => pedidosSup("POST", "/core/update").length && batimentos().length >= 6, 20000);
       v.ok(relay.pedidos.every((p) => p.segredo !== velho), "com segredo nas opções e em /data/secret, ganha o das opções");
       const b = batimentos()[0];
-      v.ok(b && isDeepStrictEqual(json(b.corpo), { version: "2026.9.3", latest: "2026.9.4", agent: "0.3.2" }),
+      v.ok(b && isDeepStrictEqual(json(b.corpo), { version: "2026.9.3", latest: "2026.9.4", agent: "0.4.0" }),
         "corpo do batimento = {version, latest, agent}");
       v.ok(b && chaves(json(b.corpo)) === "agent,latest,version", "sem campos a mais no batimento");
       v.ok(b && b.segredo === SEGREDO && b.tipo === "application/json", "x-backup-secret e content-type certos");
@@ -320,7 +328,7 @@ const cenarios = [
       if (!j) return;
       v.ok(inv.segredo === SEGREDO && inv.tipo === "application/json", "com o segredo e como application/json");
       v.ok(chaves(j) === "addons,agent,collected_at,integrations,system,updates,usb", `chaves de topo: ${chaves(j)}`);
-      v.ok(j.agent === "0.3.2" && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(j.collected_at), "agent e collected_at");
+      v.ok(j.agent === "0.4.0" && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(j.collected_at), "agent e collected_at");
       const s = j.system || {};
       v.ok(chaves(s) === "arch,core,host,ipv4,machine,os,supervisor", `chaves de system: ${chaves(s)}`);
       v.ok(isDeepStrictEqual(s.core, { version: "2026.9.3", version_latest: "2026.9.4" }), "system.core");
@@ -349,7 +357,7 @@ const cenarios = [
       v.ok(!inv.corpo.includes("cliente.privado@exemplo.pt") && !inv.corpo.includes("Shelly da sala"), "sem títulos das integrações");
       const infos = sup.pedidos.filter((p) => /^\/addons\/[^/]+\/info$/.test(p.caminho));
       v.ok(infos.length === 0, "nunca pediu /addons/<slug>/info");
-      const molde = pedidosSup("POST", "/core/api/template")[0];
+      const molde = moldesInventario()[0];
       v.ok(molde && (json(molde.corpo) || {}).template && json(molde.corpo).template.includes("device_attr(dev, 'identifiers')"), "o molde da §6.1 foi ao /core/api/template");
       v.ev(`inventário: ${inv.bytes} bytes; system = ${JSON.stringify(s)}`);
       v.ev(`addons[0] = ${JSON.stringify(j.addons[0])}`);
@@ -776,14 +784,14 @@ const cenarios = [
       const casa = novaCasa();
       const caidos = () => relay.pedidos.filter((p) => p.caiu && p.caminho === `/agent/${UUID}/heartbeat`).length;
       await esperar(() => caidos() >= 6, 20000);
-      const moldes = pedidosSup("POST", "/core/api/template").length;
+      const moldes = pedidosSup("POST", "/core/api/template").length; // nenhum: nem o do inventário, nem o do painel
       const hw = pedidosSup("GET", "/hardware/info").length;
       v.ok(moldes === 0 && hw === 0, `sem batimento, nenhuma recolha (${moldes} moldes e ${hw} GET /hardware/info em ${caidos()} batimentos falhados)`);
       relay.estado.emBaixo = false;
       const inv = await esperar(() => inventarios()[0], 10000);
       v.ok(inv, "o inventário saiu quando o relay voltou");
-      v.ok(pedidosSup("POST", "/core/api/template").length === 1, "recolhido uma vez só");
-      v.ev(`relay em baixo: ${caidos()} batimentos falhados, ${moldes} recolhas; relay de volta: inventário ${inv ? "entregue" : "—"}, ${pedidosSup("POST", "/core/api/template").length} recolha`);
+      v.ok(moldesInventario().length === 1, "recolhido uma vez só");
+      v.ev(`relay em baixo: ${caidos()} batimentos falhados, ${moldes} recolhas; relay de volta: inventário ${inv ? "entregue" : "—"}, ${moldesInventario().length} recolha`);
     },
   },
   {
@@ -1159,6 +1167,158 @@ const cenarios = [
       v.ok(noBatimento === 30, `na passagem seguinte, a do batimento 30 (${noBatimento})`);
       v.ok(!casa.linhas().some((l) => l.includes("Nenhuma cópia automática") || l.includes("não é mais nova")), "a espera não deixa linhas no registo");
       v.linhas(casa, /[Cc]ópia/);
+    },
+  },
+  // -------------------------------------------------------------------------
+  // 0.4.0 — o painel
+  // -------------------------------------------------------------------------
+  {
+    n: 37,
+    nome: "(0.4.0) O painel chega: com o segredo, {agent, collected_at, painel}, o painel tal como o Core o devolveu",
+    async correr(v) {
+      const casa = novaCasa();
+      const p = await esperar(() => paineis()[0], 15000);
+      v.ok(p, "o painel chegou ao relay");
+      if (!p) return;
+      const j = json(p.corpo);
+      v.ok(j !== undefined, "é JSON válido");
+      if (!j) return;
+      v.ok(p.segredo === SEGREDO && p.tipo === "application/json", "com o segredo e como application/json");
+      v.ok(chaves(j) === "agent,collected_at,painel", `chaves de topo: ${chaves(j)}`);
+      v.ok(j.agent === "0.4.0" && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(j.collected_at), "agent e collected_at");
+      v.ok(isDeepStrictEqual(j.painel, painelExemplo()), "o painel é o objeto que o Core devolveu, sem tirar nem pôr");
+      const molde = moldesPainel()[0];
+      v.ok(molde && json(molde.corpo).template.includes("tojson") && json(molde.corpo).template.includes("'mobile_app'"),
+        "o molde do painel foi ao /core/api/template (e deixa os telemóveis de fora)");
+      v.ok(inventarios().length >= 1 && inventarios()[0].t <= p.t, "o inventário sai primeiro, no mesmo batimento");
+      v.ev(`painel: ${p.bytes} bytes no batimento ${noBatimento(p)}; disp[1] = ${JSON.stringify(j.painel.disp[1])}`);
+    },
+  },
+  {
+    n: 38,
+    nome: "(0.4.0) Sem mudanças não volta a mandar; CPU, memória, sinal e temperaturas não contam; o envio completo sai ao 15.º batimento",
+    async correr(v) {
+      const casa = novaCasa();
+      const p1 = await esperar(() => paineis()[0], 15000);
+      v.ok(p1, "o primeiro painel chegou");
+      if (!p1) return;
+      // Só valores que mexem a cada minuto.
+      sup.estado.painel.sistema.cpu_core = 55.5;
+      sup.estado.painel.sistema.mem_core = 61.0;
+      sup.estado.painel.disp[0].rssi = -91;
+      sup.estado.painel.disp[0].lqi = 40;
+      sup.estado.painel.disp[1].t = 49.1;
+      sup.estado.painel.disp[1].up = 3.3;
+      sup.estado.painel.gerado_ha = "2026-10-30T22:05:00+00:00";
+      const b1 = noBatimento(p1);
+      await esperar(() => batimentos().length >= b1 + 12, 20000);
+      v.ok(paineis().length === 1, `nos 10 batimentos seguintes não mandou outro (${paineis().length} painéis)`);
+      v.ok(moldesPainel().length >= 10, `mas avaliou o molde a cada batimento (${moldesPainel().length} vezes)`);
+      const p2 = await esperar(() => paineis()[1], 15000);
+      v.ok(p2 && noBatimento(p2) - b1 === 15, `o envio completo saiu 15 batimentos depois (${p2 ? noBatimento(p2) - b1 : "—"})`);
+      const j2 = p2 ? json(p2.corpo) : {};
+      v.ok(j2.painel && j2.painel.sistema.cpu_core === 55.5 && j2.painel.disp[0].rssi === -91, "e leva os valores de agora");
+      v.ev(`painéis nos batimentos ${paineis().map(noBatimento).join(", ")}; moldes avaliados: ${moldesPainel().length}`);
+    },
+  },
+  {
+    n: 39,
+    nome: "(0.4.0) Um equipamento cai (ou uma pilha muda) → o painel sai logo no batimento seguinte",
+    async correr(v) {
+      const casa = novaCasa();
+      const p1 = await esperar(() => paineis()[0], 15000);
+      v.ok(p1, "o primeiro painel chegou");
+      if (!p1) return;
+      await esperar(() => batimentos().length >= noBatimento(p1) + 4, 10000);
+      const antes = batimentos().length;
+      sup.estado.painel.disp[0].e = "off";
+      sup.estado.painel.disp[0].un = 4;
+      sup.estado.painel.disp[0].desde = "30/10 22:07";
+      const p2 = await esperar(() => paineis()[1], 10000);
+      v.ok(p2 && noBatimento(p2) - (antes - 1) <= 2, `saiu logo (${p2 ? noBatimento(p2) - (antes - 1) : "—"} batimento(s) depois da mudança)`);
+      v.ok(p2 && json(p2.corpo).painel.disp[0].e === "off", "com o equipamento sem ligação");
+      sup.estado.painel.disp[2].bat = 15;
+      const p3 = await esperar(() => paineis()[2], 10000);
+      v.ok(p3 && json(p3.corpo).painel.disp[2].bat === 15, "a pilha a 15 % também sai logo");
+      v.ev(`painéis nos batimentos ${paineis().map(noBatimento).join(", ")}`);
+    },
+  },
+  {
+    n: 40,
+    nome: "(0.4.0) Relay sem a rota do painel (400) → uma linha no registo e só tenta outra vez no envio completo; o resto continua",
+    async correr(v) {
+      relay.estado.statusPainel = 400;
+      const casa = novaCasa();
+      const p1 = await esperar(() => paineis()[0], 15000);
+      v.ok(p1, "tentou mandar o painel");
+      if (!p1) return;
+      const b1 = noBatimento(p1);
+      await esperar(() => batimentos().length >= b1 + 12, 20000);
+      v.ok(paineis().length === 1, `nos 10 batimentos seguintes não insistiu (${paineis().length} tentativas)`);
+      const p2 = await esperar(() => paineis()[1], 15000);
+      v.ok(p2 && noBatimento(p2) - b1 === 15, `tentou outra vez 15 batimentos depois (${p2 ? noBatimento(p2) - b1 : "—"})`);
+      const linhas = casa.linhas().filter((l) => l.includes("Painel não entregue"));
+      v.ok(linhas.length === 1 && linhas[0].includes("400") && linhas[0].includes("próximo envio completo"), `uma linha só no registo (${linhas.length})`);
+      v.ok(inventarios().length >= 1 && batimentos().length > b1 + 12, "o inventário e o batimento seguem normalmente");
+      v.linhas(casa, /[Pp]ainel/);
+    },
+  },
+  {
+    n: 41,
+    nome: "(0.4.0) O Core em baixo (502) → não manda painel; tenta o molde de 5 em 5 batimentos; manda quando o Core volta",
+    async correr(v) {
+      sup.estado.coreEmBaixo = true;
+      const casa = novaCasa();
+      await esperar(() => moldesPainel().length >= 3, 30000);
+      const t = moldesPainel();
+      v.ok(paineis().length === 0, `nenhum painel enquanto o Core está em baixo (${paineis().length})`);
+      const bt = (p) => batimentos().filter((b) => b.t <= p.t).length - 1;
+      if (t.length >= 3) v.ok(bt(t[1]) - bt(t[0]) === 5 && bt(t[2]) - bt(t[1]) === 5, `moldes nos batimentos ${t.slice(0, 3).map(bt).join(", ")}`);
+      sup.estado.coreEmBaixo = false;
+      const p = await esperar(() => paineis()[0], 15000);
+      v.ok(p, "o painel saiu quando o Core voltou");
+      v.ok(!casa.linhas().some((l) => l.includes("molde do painel")), "sem linhas de erro do molde (Core em baixo não é erro do molde)");
+    },
+  },
+  {
+    n: 42,
+    nome: "(0.4.0) O relay responde 503 ao painel → tenta no batimento seguinte, uma linha só; quando passa, entrega",
+    async correr(v) {
+      relay.estado.statusPainel = 503;
+      const casa = novaCasa();
+      await esperar(() => paineis().length >= 4, 15000);
+      const ps = paineis();
+      v.ok(ps.length >= 4 && noBatimento(ps[3]) - noBatimento(ps[0]) === 3, `tentou a cada batimento (${ps.slice(0, 4).map(noBatimento).join(", ")})`);
+      relay.estado.statusPainel = 200;
+      const n = paineis().length;
+      await esperar(() => paineis().length > n, 5000);
+      await esperar(() => batimentos().length >= noBatimento(paineis()[paineis().length - 1]) + 6, 10000);
+      const depois = paineis().length;
+      v.ok(depois === n + 1, `entregou e parou de mandar (${depois - n} depois de voltar)`);
+      const linhas = casa.linhas().filter((l) => l.includes("Painel não entregue"));
+      v.ok(linhas.length === 1 && linhas[0].includes("503") && linhas[0].includes("batimento seguinte"), `uma linha só no registo (${linhas.length})`);
+      v.linhas(casa, /[Pp]ainel/);
+    },
+  },
+  {
+    n: 43,
+    nome: "(0.4.0) O molde do painel recusado pelo Core (400) ou com outra forma → uma linha, o resto do agente continua",
+    async correr(v) {
+      sup.estado.painelErro = { status: 400, message: "Error rendering template: UndefinedError: 'device_attr' is undefined" };
+      const casa = novaCasa();
+      await esperar(() => moldesPainel().length >= 1 && batimentos().length >= 8, 15000);
+      v.ok(paineis().length === 0, "não mandou painel");
+      v.ok(moldesPainel().length === 1, `não repetiu o molde a cada batimento (${moldesPainel().length})`);
+      const l1 = casa.linhas().filter((l) => l.includes("O molde do painel falhou no Core"));
+      v.ok(l1.length === 1 && l1[0].includes("400"), "uma linha com o 400 e a mensagem do Core");
+      // Outra forma: um array em vez do objeto.
+      sup.estado.painelErro = null;
+      sup.estado.painel = "[1,2,3]";
+      await esperar(() => moldesPainel().length >= 2, 25000);
+      await esperar(() => casa.linhas().some((l) => l.includes("não devolveu o objeto esperado")), 3000);
+      v.ok(casa.linhas().some((l) => l.includes("não devolveu o objeto esperado")) && paineis().length === 0, "um array não é painel: não sai, uma linha");
+      v.ok(inventarios().length >= 1, "o inventário saiu na mesma");
+      v.linhas(casa, /[Pp]ainel/);
     },
   },
 ];

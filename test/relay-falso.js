@@ -5,6 +5,7 @@
 //   POST /agent/register                 registo com código de instalação
 //   POST /agent/<uuid>/heartbeat         batimento (recado antigo + fila)
 //   POST /agent/<uuid>/inventory         inventário
+//   POST /agent/<uuid>/painel            painel (0.4.0)
 //   POST /agent/<uuid>/commands/<id>     resultado de um comando
 //   POST /backup/<uuid>/url | /done      carteiro das cópias
 //   PUT  /r2/<chave>                     o "cofre" (o PUT direto ao R2)
@@ -39,6 +40,9 @@ function estadoInicial() {
     fila: [],
     // O código com que se responde aos resultados.
     statusResultado: 200,
+    // O código com que se responde ao painel: 400 é um relay anterior à
+    // rota (o "Malformed agent path" do relay real).
+    statusPainel: 200,
   };
 }
 
@@ -67,7 +71,7 @@ function criarRelay({ publico = "http://host.docker.internal:18431" } = {}) {
     }
 
     // O resto é da casa: o segredo tem de bater certo.
-    const doAgente = /^\/agent\/([a-f0-9]{32})\/(heartbeat|inventory|commands\/(\d+))$/.exec(caminho);
+    const doAgente = /^\/agent\/([a-f0-9]{32})\/(heartbeat|inventory|painel|commands\/(\d+))$/.exec(caminho);
     const doCofre = /^\/backup\/([a-f0-9]{32})\/(url|done)$/.exec(caminho);
     if ((doAgente || doCofre) && (req.headers["x-backup-secret"] !== s.segredo || (doAgente || doCofre)[1] !== s.uuid)) {
       return json(403, { error: "forbidden" });
@@ -91,6 +95,14 @@ function criarRelay({ publico = "http://host.docker.internal:18431" } = {}) {
       if (texto.length > 512 * 1024) return json(413, { error: "too_large" });
       if (corpo === undefined || !corpo || typeof corpo.agent !== "string") return json(400, { error: "malformed" });
       return json(200, { ok: true });
+    }
+    if (req.method === "POST" && doAgente && doAgente[2] === "painel") {
+      if (s.statusPainel === 400) return json(400, { errorMessage: "Malformed agent path" });
+      if (texto.length > 256 * 1024) return json(413, { error: "too_large" });
+      if (corpo === undefined || !corpo || typeof corpo.agent !== "string" || !corpo.painel || typeof corpo.painel !== "object") {
+        return json(400, { error: "malformed" });
+      }
+      return json(s.statusPainel, s.statusPainel === 200 ? { ok: true } : { error: "x" });
     }
     if (req.method === "POST" && doAgente && doAgente[3]) {
       return json(s.statusResultado, s.statusResultado === 200 ? { ok: true } : { error: "x" });
