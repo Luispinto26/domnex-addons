@@ -37,6 +37,13 @@ function painelExemplo() {
       { n: "Sensor Porta", a: "Entrada", r: "zha", m: "SNZB-04PR2", e: "ok", un: 0, tot: 4, desde: null, bat: 100, lqi: 240, rssi: -40,
         t: null, fw: "0x00001001", fwn: null, ue: false, up: null, rr: null, sa: null, cl: null, fil: null },
     ],
+    // 0.5.0: automações, scripts e cenários — nome, estado, última vez, em curso, modo.
+    auto: [
+      { n: "[Sala] Luz ao pôr do sol", e: "on", ult: "2026-10-30T18:02:11+00:00", cor: 0, modo: "single" },
+      { n: "[Casa] Saída de casa", e: "off", ult: null, cor: 0, modo: "restart" },
+    ],
+    scripts: [{ n: "Boa noite", e: "off", ult: "2026-10-29T23:10:00+00:00", cor: 0, modo: "single" }],
+    cenas: [{ n: "Cinema", e: "ok", ult: "2026-10-28T21:00:00+00:00" }],
   };
 }
 

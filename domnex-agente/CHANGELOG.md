@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.0 — por publicar
+
+- **Automações, scripts e cenários no painel.** De cada um sai o nome, se
+  está ligado, desligado ou indisponível, a última vez que correu, quantas
+  execuções correm agora e o modo (single, restart, queued, parallel). O
+  que fazem — gatilhos, condições, ações — não sai.
+- **Só quando muda, como o resto.** Ligar, desligar, criar, apagar ou
+  mudar o nome conta; a última vez que correram e as execuções em curso
+  não contam e seguem no envio completo, de 15 em 15 minutos.
+- **Depois de cada comando, o painel completo.** Além do inventário, o
+  agente manda logo o painel inteiro (com sinal e temperaturas). É o que
+  faz o botão "Pedir dados à casa" da página de atendimento, que põe um
+  `inventory` na fila.
+- **Compatível com o relay antigo.** O relay escolhe campo a campo: um
+  relay sem estes campos guarda o painel na mesma, só sem eles.
+
 ## 0.4.0 — por publicar
 
 - **O painel.** De minuto em minuto o agente avalia no Core o estado dos

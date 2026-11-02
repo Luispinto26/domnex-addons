@@ -46,13 +46,18 @@ Tudo vai autenticado pelo segredo desta casa.
   do processador, a alimentação do Pi e as datas da última cópia. Os
   nomes dos equipamentos saem como estão no HA — se tiverem nomes de
   pessoas, saem com eles.
+- No painel (desde a 0.5.0): de cada automação, script e cenário, o nome
+  como está no HA, se está ligado, desligado ou indisponível, a última vez
+  que correu, quantas execuções correm agora e o modo. Os nomes saem como
+  estão — se tiverem nomes de pessoas ou de divisões, saem com eles.
 - O resultado de cada comando, e o ficheiro da cópia.
 
 **Não sai**: as opções dos add-ons (palavras-passe incluídas — o agente lê
 a lista de add-ons, que não as traz, e nunca a ficha de cada um), o nome
 que cada integração tem no Home Assistant (pode ter o email do cliente),
 os telemóveis (`mobile_app`), IPs e MACs dos equipamentos, valores de
-sensores de ambiente, histórico, automações.
+sensores de ambiente, histórico, o conteúdo das automações, scripts e
+cenários (gatilhos, condições, ações, os estados que um cenário põe).
 
 ## O painel
 
@@ -62,7 +67,10 @@ página assistentes.domnex.pt mostra. Para não escrever na consola de
 minuto a minuto, só manda quando alguma coisa que conta mudou (um
 equipamento caiu ou voltou, uma pilha mudou, apareceu uma atualização…);
 CPU, memória, sinal, temperaturas e tempo a funcionar não contam para essa
-comparação e seguem no envio completo, de 15 em 15 minutos. Um relay que
+comparação e seguem no envio completo, de 15 em 15 minutos — tal como,
+desde a 0.5.0, a última vez que cada automação, script ou cenário correu.
+Depois de cada comando da consola (um `inventory`, por exemplo) o painel
+completo sai logo, com o inventário. Um relay que
 ainda não tenha a rota responde 400: o agente escreve uma linha e tenta de
 novo só no envio completo seguinte.
 
@@ -145,7 +153,7 @@ cheio), vai logo direto à consola.
 Um batimento que corre bem não escreve nada. O resto, uma linha por
 acontecimento:
 
-- `Domnex Agente 0.4.0 a arrancar.` — o add-on arrancou, nesta versão.
+- `Domnex Agente 0.5.0 a arrancar.` — o add-on arrancou, nesta versão.
 - `Sem segredo nem código de instalação — …` — as duas opções estão
   vazias; o add-on não faz nada até ter uma.
 - `Sem segredo: a registar a casa na consola com o código de instalação.`

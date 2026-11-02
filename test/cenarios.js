@@ -26,7 +26,7 @@ const { criarRelay, UUID, SEGREDO } = require("./relay-falso");
 
 const RAIZ = path.resolve(__dirname, "..");
 const PASTA_ADDON = path.join(RAIZ, "domnex-agente");
-const IMAGEM = process.env.IMAGEM || "domnex-agente:0.4.0-teste";
+const IMAGEM = process.env.IMAGEM || "domnex-agente:0.5.0-teste";
 const BASE = process.env.BUILD_FROM || "ghcr.io/home-assistant/amd64-base:latest";
 const HOST = process.env.HOST_DOCKER || "host.docker.internal";
 const CODIGO = "INST-ABCD-EFGH";
@@ -295,7 +295,7 @@ const cenarios = [
       await esperar(() => pedidosSup("POST", "/core/update").length && batimentos().length >= 6, 20000);
       v.ok(relay.pedidos.every((p) => p.segredo !== velho), "com segredo nas opções e em /data/secret, ganha o das opções");
       const b = batimentos()[0];
-      v.ok(b && isDeepStrictEqual(json(b.corpo), { version: "2026.9.3", latest: "2026.9.4", agent: "0.4.0" }),
+      v.ok(b && isDeepStrictEqual(json(b.corpo), { version: "2026.9.3", latest: "2026.9.4", agent: "0.5.0" }),
         "corpo do batimento = {version, latest, agent}");
       v.ok(b && chaves(json(b.corpo)) === "agent,latest,version", "sem campos a mais no batimento");
       v.ok(b && b.segredo === SEGREDO && b.tipo === "application/json", "x-backup-secret e content-type certos");
@@ -328,7 +328,7 @@ const cenarios = [
       if (!j) return;
       v.ok(inv.segredo === SEGREDO && inv.tipo === "application/json", "com o segredo e como application/json");
       v.ok(chaves(j) === "addons,agent,collected_at,integrations,system,updates,usb", `chaves de topo: ${chaves(j)}`);
-      v.ok(j.agent === "0.4.0" && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(j.collected_at), "agent e collected_at");
+      v.ok(j.agent === "0.5.0" && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(j.collected_at), "agent e collected_at");
       const s = j.system || {};
       v.ok(chaves(s) === "arch,core,host,ipv4,machine,os,supervisor", `chaves de system: ${chaves(s)}`);
       v.ok(isDeepStrictEqual(s.core, { version: "2026.9.3", version_latest: "2026.9.4" }), "system.core");
@@ -1185,7 +1185,7 @@ const cenarios = [
       if (!j) return;
       v.ok(p.segredo === SEGREDO && p.tipo === "application/json", "com o segredo e como application/json");
       v.ok(chaves(j) === "agent,collected_at,painel", `chaves de topo: ${chaves(j)}`);
-      v.ok(j.agent === "0.4.0" && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(j.collected_at), "agent e collected_at");
+      v.ok(j.agent === "0.5.0" && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(j.collected_at), "agent e collected_at");
       v.ok(isDeepStrictEqual(j.painel, painelExemplo()), "o painel é o objeto que o Core devolveu, sem tirar nem pôr");
       const molde = moldesPainel()[0];
       v.ok(molde && json(molde.corpo).template.includes("tojson") && json(molde.corpo).template.includes("'mobile_app'"),
@@ -1319,6 +1319,66 @@ const cenarios = [
       v.ok(casa.linhas().some((l) => l.includes("não devolveu o objeto esperado")) && paineis().length === 0, "um array não é painel: não sai, uma linha");
       v.ok(inventarios().length >= 1, "o inventário saiu na mesma");
       v.linhas(casa, /[Pp]ainel/);
+    },
+  },
+
+  // -------------------------------------------------------------------------
+  // 0.5.0 — automações, scripts e cenários; o painel completo depois de cada comando
+  // -------------------------------------------------------------------------
+  {
+    n: 44,
+    nome: "(0.5.0) Automações no painel: a última vez que correu e as execuções em curso não contam; desligar uma sai logo",
+    async correr(v) {
+      const casa = novaCasa();
+      const p1 = await esperar(() => paineis()[0], 15000);
+      v.ok(p1, "o primeiro painel chegou");
+      if (!p1) return;
+      const j1 = json(p1.corpo);
+      v.ok(isDeepStrictEqual(j1.painel.auto, painelExemplo().auto) && isDeepStrictEqual(j1.painel.scripts, painelExemplo().scripts)
+        && isDeepStrictEqual(j1.painel.cenas, painelExemplo().cenas), "leva as automações, os scripts e os cenários tal como o Core os devolveu");
+      // Só o que mexe sempre: a última vez que correram e as execuções em curso.
+      sup.estado.painel.auto[0].ult = "2026-10-30T22:03:00+00:00";
+      sup.estado.painel.auto[0].cor = 1;
+      sup.estado.painel.scripts[0].ult = "2026-10-30T22:03:30+00:00";
+      sup.estado.painel.cenas[0].ult = "2026-10-30T22:04:00+00:00";
+      const b1 = noBatimento(p1);
+      await esperar(() => batimentos().length >= b1 + 7, 15000);
+      v.ok(paineis().length === 1, `com só a última vez/em curso a mudar, não mandou outro (${paineis().length} painéis)`);
+      // Desligar uma automação conta.
+      const antes = batimentos().length;
+      sup.estado.painel.auto[0].e = "off";
+      const p2 = await esperar(() => paineis()[1], 10000);
+      v.ok(p2 && noBatimento(p2) - (antes - 1) <= 2, `desligar uma automação saiu logo (${p2 ? noBatimento(p2) - (antes - 1) : "—"} batimento(s) depois)`);
+      const j2 = p2 ? json(p2.corpo) : {};
+      v.ok(j2.painel && j2.painel.auto[0].e === "off" && j2.painel.auto[0].ult === "2026-10-30T22:03:00+00:00",
+        "com a automação desligada e a última vez de agora");
+      v.ev(`painéis nos batimentos ${paineis().map(noBatimento).join(", ")}`);
+    },
+  },
+  {
+    n: 45,
+    nome: "(0.5.0) Um inventory da fila (o \"Pedir dados à casa\") → depois do resultado saem o inventário e o painel completo, mesmo sem mudanças",
+    async correr(v) {
+      const casa = novaCasa();
+      const p1 = await esperar(() => paineis()[0], 15000);
+      v.ok(p1, "o primeiro painel chegou");
+      if (!p1) return;
+      await esperar(() => batimentos().length >= noBatimento(p1) + 4, 10000);
+      const nInv = inventarios().length;
+      v.ok(paineis().length === 1, "sem mudanças, ainda só um painel");
+      relay.estado.fila.push({ id: 77, type: "inventory" });
+      const r = await esperar(() => resultados(77)[0], 15000);
+      v.ok(r && json(r.corpo).ok === true, "o resultado do comando chegou (ok)");
+      const p2 = await esperar(() => paineis()[1], 10000);
+      v.ok(p2, "o painel completo saiu sem nenhuma mudança na casa");
+      v.ok(p2 && r && noBatimento(p2) - noBatimento(r) <= 1, `logo a seguir ao resultado (${p2 && r ? noBatimento(p2) - noBatimento(r) : "—"} batimento(s))`);
+      v.ok(inventarios().length > nInv, "e o inventário também");
+      // E depois volta ao ritmo normal: sem mudanças, nada até ao envio completo.
+      const b2 = p2 ? noBatimento(p2) : 0;
+      await esperar(() => batimentos().length >= b2 + 6, 12000);
+      v.ok(paineis().length === 2, `depois, sem mudanças, não manda mais (${paineis().length} painéis)`);
+      v.ev(`resultado no batimento ${r ? noBatimento(r) : "—"}; painéis nos batimentos ${paineis().map(noBatimento).join(", ")}`);
+      v.linhas(casa, /#77|[Pp]ainel/);
     },
   },
 ];

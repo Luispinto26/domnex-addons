@@ -18,7 +18,8 @@
 # — O carteiro das cópias: de meia em meia hora (30 batimentos) espreita
 #   /backup e, quando o HA tiver uma cópia nova, entrega-a ao cofre.
 #
-# — O painel (desde a 0.4.0): de minuto em minuto avalia no Core o molde do
+# — O painel (desde a 0.4.0; com as automações, scripts e cenários desde a
+#   0.5.0): de minuto em minuto avalia no Core o molde do
 #   painel (o estado de cada equipamento: ligação, pilha, sinal, temperatura
 #   interna, firmware…, e os recursos do servidor) e manda-o ao relay quando
 #   alguma coisa que conta mudou, e de 15 em 15 minutos de qualquer forma.
@@ -57,7 +58,7 @@ CARTEIRO_TICKS="${DOMNEX_CARTEIRO:-10}"
 # PAINEL_REFRESH batimentos (15 min) manda-se de qualquer forma.
 PAINEL_TICKS="${DOMNEX_PAINEL:-1}"
 PAINEL_REFRESH="${DOMNEX_PAINEL_REFRESH:-15}"
-AGENT_VERSION="0.4.0"
+AGENT_VERSION="0.5.0"
 STATE="$DATA/last_uploaded"
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
@@ -624,8 +625,13 @@ entregar_resultado() {
       esac
       RESULTADO_ERRO=""
       # Depois de qualquer comando, o inventário: é assim que a consola vê
-      # a versão nova, o add-on parado, o Pi que voltou.
+      # a versão nova, o add-on parado, o Pi que voltou. Desde a 0.5.0
+      # também o painel completo (com sinal, temperaturas e a última vez que
+      # as automações correram), mesmo sem mudanças: é o "Pedir dados à
+      # casa" da página de atendimento, que põe na fila um "inventory".
       INV_AT=$TICK
+      PAINEL_AT=$TICK
+      PAINEL_COMPLETO=0
       ;;
     *)
       [ "$_eh" = "$RESULTADO_ERRO" ] || log "O resultado do comando #$_eid não foi entregue ($(motivo "$_eh")) — fica guardado e tenta no batimento seguinte."
@@ -779,8 +785,11 @@ enviar_inventario() {
 # atualizações e um item por equipamento. Sai da casa só o que o molde
 # escolhe: nomes, divisões, modelos, firmware, estado, pilha, sinal,
 # temperatura interna do próprio aparelho, tempo a funcionar, reinício
-# necessário, sobreaquecimento, Shelly cloud, filtro do AC. Os telemóveis
-# (mobile_app) e os serviços ficam de fora; IPs, MACs e tokens nunca entram.
+# necessário, sobreaquecimento, Shelly cloud, filtro do AC. Desde a 0.5.0
+# também as automações, os scripts e os cenários: nome, estado, a última
+# vez que correram, quantas execuções correm agora e o modo — o que fazem
+# (gatilhos, condições, ações) não sai. Os telemóveis (mobile_app) e os
+# serviços ficam de fora; IPs, MACs e tokens nunca entram.
 # O relay volta a escolher campo a campo — nunca confia no que vem da casa.
 molde_painel() {
   cat <<'EOF'
@@ -846,18 +855,24 @@ molde_painel() {
 {%- endfor -%}
 {%- set up = namespace(l=[]) -%}
 {%- for s in states.update | selectattr('state','eq','on') -%}{%- set up.l = up.l + [{'n': s.name, 'de': s.attributes.installed_version, 'para': s.attributes.latest_version}] -%}{%- endfor -%}
+{#- Automações, scripts e cenários (0.5.0): só o nome, o estado, a última vez que correram, quantas correm agora e o modo. O conteúdo (gatilhos, condições, ações) não sai. -#}
+{%- set au = namespace(l=[], s=[], c=[]) -%}
+{%- for s in states.automation -%}{%- set lt = s.attributes.last_triggered -%}{%- set lt = as_datetime(lt|string) if lt else none -%}{%- set au.l = au.l + [{'n': s.name, 'e': s.state if s.state in ['on','off'] else 'unavailable', 'ult': (lt|as_local).isoformat() if lt else none, 'cor': s.attributes.current|int(0), 'modo': s.attributes.mode|default(none)}] -%}{%- endfor -%}
+{%- for s in states.script -%}{%- set lt = s.attributes.last_triggered -%}{%- set lt = as_datetime(lt|string) if lt else none -%}{%- set au.s = au.s + [{'n': s.name, 'e': s.state if s.state in ['on','off'] else 'unavailable', 'ult': (lt|as_local).isoformat() if lt else none, 'cor': s.attributes.current|int(0), 'modo': s.attributes.mode|default(none)}] -%}{%- endfor -%}
+{%- for s in states.scene -%}{%- set lt = as_datetime(s.state) if s.state not in ['unknown','unavailable'] else none -%}{%- set au.c = au.c + [{'n': s.name, 'e': 'unavailable' if s.state == 'unavailable' else 'ok', 'ult': (lt|as_local).isoformat() if lt else none}] -%}{%- endfor -%}
 {%- set bk = namespace(ok=none, tent=none) -%}
 {%- for x in integration_entities('backup') -%}
 {%- if 'last_successful' in x and as_datetime(states(x)) -%}{%- set bk.ok = (as_datetime(states(x))|as_local).isoformat() -%}{%- endif -%}
 {%- if 'last_attempted' in x and as_datetime(states(x)) -%}{%- set bk.tent = (as_datetime(states(x))|as_local).isoformat() -%}{%- endif -%}
 {%- endfor -%}
-{{ {'v': 1, 'gerado_ha': now().isoformat(), 'sistema': {'ha': ver.core, 'ha_nova': ver.core_n, 'os': ver.os, 'os_nova': ver.os_n, 'sup': ver.sup, 'sup_nova': ver.sup_n, 'cpu_core': sis.cpu_core, 'mem_core': sis.mem_core, 'cpu_sup': sis.cpu_sup, 'mem_sup': sis.mem_sup, 'disco_livre_gb': sis.disco_livre, 'disco_pct': sis.disco_pct, 'hub_temp': sis.hub_t, 'alimentacao': sis.alim}, 'backup': {'ultimo_ok': bk.ok, 'ultima_tentativa': bk.tent}, 'atualizacoes': up.l, 'disp': ns.out} | tojson }}
+{{ {'v': 1, 'gerado_ha': now().isoformat(), 'sistema': {'ha': ver.core, 'ha_nova': ver.core_n, 'os': ver.os, 'os_nova': ver.os_n, 'sup': ver.sup, 'sup_nova': ver.sup_n, 'cpu_core': sis.cpu_core, 'mem_core': sis.mem_core, 'cpu_sup': sis.cpu_sup, 'mem_sup': sis.mem_sup, 'disco_livre_gb': sis.disco_livre, 'disco_pct': sis.disco_pct, 'hub_temp': sis.hub_t, 'alimentacao': sis.alim}, 'backup': {'ultimo_ok': bk.ok, 'ultima_tentativa': bk.tent}, 'atualizacoes': up.l, 'disp': ns.out, 'auto': au.l, 'scripts': au.s, 'cenas': au.c} | tojson }}
 EOF
 }
 
 # Avalia e, se for caso disso, manda. Os valores que mexem a cada minuto
-# (CPU, memória, sinal, temperaturas, tempo a funcionar) ficam de fora da
-# comparação — com eles, mandava-se tudo de minuto a minuto; chegam no envio
+# (CPU, memória, sinal, temperaturas, tempo a funcionar e, desde a 0.5.0, a
+# última vez que cada automação, script ou cenário correu e as execuções em
+# curso) ficam de fora da comparação — com eles, mandava-se tudo de minuto a minuto; chegam no envio
 # completo, de PAINEL_REFRESH em PAINEL_REFRESH batimentos.
 # Devolve 0 tratado (mandado, ou sem mudanças); 1 não entregue, tenta no
 # batimento seguinte; 2 o Core em baixo, tenta 5 batimentos depois; 3 o
@@ -889,7 +904,8 @@ enviar_painel() {
   fi
   _phash=$(jq -c 'del(.gerado_ha)
     | .sistema |= (if type == "object" then del(.cpu_core, .mem_core, .cpu_sup, .mem_sup) else . end)
-    | .disp |= (if type == "array" then map(if type == "object" then del(.lqi, .rssi, .t, .up) else . end) else . end)' \
+    | .disp |= (if type == "array" then map(if type == "object" then del(.lqi, .rssi, .t, .up) else . end) else . end)
+    | (.auto, .scripts, .cenas) |= (if type == "array" then map(if type == "object" then del(.ult, .cor) else . end) else . end)' \
     "$_d/painel" 2>/dev/null | sha256sum | cut -c1-64)
   if [ "$_phash" = "$PAINEL_HASH" ] && [ "$TICK" -lt "$PAINEL_COMPLETO" ]; then
     rm -rf "$_d"

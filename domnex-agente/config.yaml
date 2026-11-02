@@ -1,4 +1,7 @@
-# A 0.4.0 junta o painel: o estado dos equipamentos, de minuto a minuto e só
+# A 0.5.0 junta ao painel as automações, os scripts e os cenários (nome,
+# estado, última vez que correram), e manda o painel completo depois de
+# cada comando — é o "Pedir dados à casa" da página de atendimento.
+# A 0.4.0 juntou o painel: o estado dos equipamentos, de minuto a minuto e só
 # quando muda, para a página assistentes.domnex.pt (ver DOCS.md).
 #
 # O agente local da Domnex: entrega a cópia diária ao cofre e mantém o
@@ -21,7 +24,7 @@
 # A passagem de `local_omnex_backup` para `<hash deste repositório>_omnex_backup`
 # é exatamente essa troca, uma vez e à mão, nas casas que vinham de /addons.
 name: Domnex Agente
-version: "0.4.0"
+version: "0.5.0"
 slug: omnex_backup
 description: Cópias de segurança no cofre da Domnex e gestão remota pela consola
 url: https://github.com/Luispinto26/domnex-addons
